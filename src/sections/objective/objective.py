@@ -5,9 +5,6 @@ from utils import adicionar_titulo_secao, adicionar_paragrafo_justificado
 def gerar_secao_objetivo(doc: Document, row=None):
     """
     Gera a seção 2 - OBJETIVO do relatório.
-
-    Mantém a lógica original, mas com estrutura mais clara e preparada
-    para uso de dados dinâmicos vindos da linha 'row' (quando disponível).
     """
 
     num_monitoramento = "Xº"

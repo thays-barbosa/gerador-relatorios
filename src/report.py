@@ -1,10 +1,3 @@
-"""
-report.py
-
-Gera relatórios (DOCX + PDF) a partir da planilha de fiscalizações e das fotos.
-Refatoração focada em legibilidade e organização, mantendo lógica original.
-"""
-
 from typing import Optional
 
 import os
@@ -44,10 +37,10 @@ def atualizar_toc_e_converter_para_pdf(caminho_docx: str, caminho_pdf: str) -> b
         word.Visible = False
         doc = word.Documents.Open(caminho_docx)
 
-        # Atualiza campos (incluindo TOC)
+        
         doc.Fields.Update()
         doc.Save()
-        # 17 = wdFormatPDF
+       
         doc.SaveAs2(caminho_pdf, FileFormat=17)
 
         doc.Close(SaveChanges=False)
@@ -90,13 +83,13 @@ def gerar_relatorio() -> None:
     # Verifica se planilha está em uso
     if arquivo_em_uso(CAMINHO_PLANILHA):
         print("⚠️ A planilha está em uso. Feche-a antes de executar o script.")
-        exit(1)
+        sys.exit(1)
 
-    # Carrega dados
+   
     fiscalizacoes_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Fiscalizações")
     nao_conformidades_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Não-conformidades ")
 
-    # Garante coluna de status
+   
     if COLUNA_STATUS not in fiscalizacoes_df.columns:
         fiscalizacoes_df[COLUNA_STATUS] = False
     fiscalizacoes_df[COLUNA_STATUS] = fiscalizacoes_df[COLUNA_STATUS].fillna(False).astype(bool)
@@ -108,7 +101,7 @@ def gerar_relatorio() -> None:
         input("Pressione Enter para sair...")
         return
 
-    # --- Configuração de pastas de fotos ---
+    
     print("\n--- Configuração de Pastas de Fotos ---")
 
     # Validação da pasta CTR (contrato)
@@ -125,13 +118,13 @@ def gerar_relatorio() -> None:
         print(f"\n❌ A pasta de Contrato '{pasta_contrato}' não foi encontrada. Por favor, verifique seus arquivos.")
         print("Pressione Enter para sair...")
         input()
-        exit(0)
+        sys.exit(0)
 
     if not os.listdir(CAMINHO_CTR):
         print(f"\n⚠️ A pasta de Contrato '{pasta_contrato}' está vazia.Por favor, verifique seus arquivos.")
         print("Não há pastas de Monitoramento. Pressione Enter para sair...")
         input()
-        exit(0)
+        sys.exit(0)
 
     # Validação da pasta de Monitoramento
     while True:
@@ -147,13 +140,13 @@ def gerar_relatorio() -> None:
         print(f"\n❌ A subpasta de Monitoramento '{pasta_monitoramento}' não foi encontrada dentro de '{pasta_contrato}'. Por favor, verifique seus arquivos.")
         print("Pressione Enter para sair...")
         input()
-        exit(0)
+        sys.exit(0)
 
     if not os.listdir(CAMINHO_RAIZ_FOTOS):
         print(f"\n⚠️ A subpasta de Monitoramento '{pasta_monitoramento}' está vazia.")
         print("O relatório será **gerado sem o Anexo de Fotos** para esta fiscalização.")
 
-    # Nome padrão do logo de capa
+    
     NOME_LOGO = "capa_monitoramento_arpe.jpg"
 
     # Itera sobre fiscalizações pendentes
@@ -162,11 +155,11 @@ def gerar_relatorio() -> None:
         id_fisc = row["ID da Fiscalização"]
 
         doc = Document()
-        # Ajuste de margem superior
+       
         section = doc.sections[0]
         section.top_margin = Inches(0.25)
 
-        # Capa — textos centralizados
+        
         adicionar_texto_centralizado(doc, "COORDENADORIA DE TRANSPORTES E RODOVIAS")
         primeiro_paragrafo = doc.paragraphs[-1]
         primeiro_paragrafo.paragraph_format.space_before = Pt(0)
@@ -176,7 +169,7 @@ def gerar_relatorio() -> None:
         adicionar_texto_centralizado(doc, "RELATÓRIO DO Xº MONITORAMENTO DAS NÃO CONFORMIDADES DO PROCESSO CTR Nº XX/XXXX")
         doc.add_paragraph()
 
-        # Logo da capa (se existir)
+       
         caminho_logo = os.path.join(FOTOS_DIR, NOME_LOGO)
         if os.path.exists(caminho_logo):
             buffer_logo = processar_imagem_para_relatorio(caminho_logo, largura_max=500, qualidade=95)
@@ -199,10 +192,10 @@ def gerar_relatorio() -> None:
         adicionar_paragrafo_justificado(doc, texto_data)
         doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        # Insere sumário (quebra + TOC)
+        
         inserir_quebra_e_sumario(doc)
 
-        # Seções do relatório (mantendo ordem e lógica originais)
+        
         gerar_secao_introducao(doc, row)
         gerar_secao_objetivo(doc)
 
@@ -210,14 +203,14 @@ def gerar_relatorio() -> None:
         gerar_secao_resumo_nao_conformidades(doc, row, nao_conformidades_df)
         gerar_secao_consideracoes_finais(doc, row)
 
-        # Anexo de fotos: tenta gerar; captura erro mas segue o fluxo
+        
         if nao_conformidades_df is not None:
             try:
                 gerar_secao_anexo_fotos(doc, row, nao_conformidades_df, CAMINHO_RAIZ_FOTOS)
             except Exception as exc:
                 print(f"Erro ao gerar Anexo: {exc}")
 
-        # Salva DOCX e tenta converter para PDF
+       
         nome_arquivo = f"relatorio_{id_fisc}"
         caminho_docx = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.docx")
         caminho_pdf = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.pdf")

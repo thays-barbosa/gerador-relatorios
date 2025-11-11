@@ -124,13 +124,13 @@ def gerar_secao_nao_conformidades_constatadas(doc, row: dict, nao_conformidades_
             if num_ids != num_descricoes:
                 if 0 < num_ids < num_descricoes:
                     nc_identificadores.extend([nc_identificadores[-1]] * (num_descricoes - num_ids))
-                    tqdm_write(f"⚠️ IDs menores que descrições ({log_id}). IDs faltantes replicados.")
+                    tqdm_write(f"⚠️ Quantidade de IDs menores que descrições ({log_id}). Confira sua planilha.")
                 elif num_ids > num_descricoes:
                     nc_identificadores = nc_identificadores[:num_descricoes]
-                    tqdm_write(f"⚠️ IDs maiores que descrições ({log_id}). IDs extras ignorados.")
+                    tqdm_write(f"⚠️ Quantidade de IDs maiores que descrições ({log_id}). Confira sua planilha.")
                 elif num_ids == 0 and num_descricoes > 0:
                     nc_identificadores = ["ID_FALTANDO"] * num_descricoes
-                    tqdm_write(f"⚠️ IDs ausentes ({log_id}). Usado 'ID_FALTANDO' como substituto.")
+                    tqdm_write(f"⚠️ Quantidade de IDs ausentes ({log_id}). Usado 'ID_FALTANDO' como substituto.")
 
             # Montagem da seção por item
             for i, descricao in enumerate(descricoes):

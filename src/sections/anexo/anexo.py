@@ -3,7 +3,6 @@ anexo.py
 
 Gera a seção 'ANEXO - MEMORIAL FOTOGRÁFICO' do relatório, buscando fotos no disco
 com base no 'ID da não conformidade' presente na planilha.
-Refatoração focada em legibilidade e consistência, sem alterar a lógica.
 """
 
 from typing import List
@@ -185,7 +184,6 @@ def gerar_secao_anexo_fotos(doc: Document, row: Row, nao_conformidades_df: DataF
             num_fotos_encontradas = len(fotos_encontradas)
             legendas_alinhadas = _adaptar_lista_anexo(legendas_por_foto_brutas, num_fotos_encontradas, "")
 
-            # Insere contexto (ID - constatação) antes das fotos
             _adicionar_contexto_nc(doc, nc_id_bruto.strip(), constatacao.strip())
 
             if fotos_encontradas:
@@ -201,7 +199,6 @@ def gerar_secao_anexo_fotos(doc: Document, row: Row, nao_conformidades_df: DataF
                         legendas_alinhadas[idx_legenda2] if (foto2_nome and idx_legenda2 < num_fotos_encontradas) else ""
                     )
 
-                    # Adiciona as imagens (função já trata foto única ou dupla)
                     adicionar_duas_imagens_lado_a_lado(
                         doc,
                         caminho_fotos_monitoramento,
