@@ -1,190 +1,161 @@
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-import os
-import pandas as pd
 from utils import (
     adicionar_paragrafo_justificado,
     adicionar_titulo_secao,
-    aplicar_borda_paragrafo,
-    adicionar_legenda_formatada,
-    processar_imagem_para_relatorio,
+    adicionar_paragrafo_info_compacta,
+    aplicar_estilo_corpo,
+    aplicar_estilo_titulo
 )
+from typing import Any
+import pandas as pd
+
+try:
+    from tqdm import tqdm
+    tqdm_write = tqdm.write
+except ImportError:
+    tqdm_write = print
 
 
-def gerar_secao_nao_conformidades_constatadas(
-    doc, row, nao_conformidades_df, fotos_dir, observacoes_df, recomendacoes_df
-):
+def _inserir_texto_nc(doc, nc_titulo_identificador: str, descricao: str):
     """
-    Gera a seção '3. NÃO CONFORMIDADES CONSTATADAS',
-    incluindo Observações Importantes e Recomendações.
+    Insere o cabeçalho e a descrição de uma Não Conformidade no documento.
     """
+    paragrafo_nc = doc.add_paragraph()
 
-    adicionar_titulo_secao(doc, "3. NÃO CONFORMIDADES CONSTATADAS")
+    run_titulo = paragrafo_nc.add_run(f"Não Conformidade {nc_titulo_identificador}")
+    aplicar_estilo_corpo(run_titulo, negrito=True)
+    run_titulo.underline = True
+    run_titulo.font.color.rgb = RGBColor(0, 0, 0)
+
+    run_traco = paragrafo_nc.add_run(" - ")
+    aplicar_estilo_corpo(run_traco)
+    run_traco.underline = False
+    run_traco.font.color.rgb = RGBColor(0, 0, 0)
+
+    run_desc = paragrafo_nc.add_run(descricao)
+    aplicar_estilo_corpo(run_desc)
+    run_desc.underline = False
+    run_desc.font.color.rgb = RGBColor(0, 0, 0)
+
+    paragrafo_nc.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
+
+
+def _inserir_linhas_info(doc, info_socicam: str, constatacao: str, analise_arpe: str):
+    """
+    Insere os blocos de 'Informação', 'Constatação' e 'Análise' de forma compacta.
+    """
+    adicionar_paragrafo_info_compacta(doc, "Informação da SOCICAM: ", info_socicam)
+    adicionar_paragrafo_info_compacta(doc, "Constatação: ", constatacao)
+    adicionar_paragrafo_info_compacta(doc, "Análise da ARPE: ", analise_arpe)
+
+
+def _safe_split(nc_data: Any, col_name: str, default: str = "Texto não disponível") -> list:
+    """
+    Divide os textos de uma coluna (separados por ';') em uma lista limpa.
+    Retorna uma lista contendo um valor padrão se o conteúdo for inválido.
+    """
+    if not isinstance(nc_data, (pd.Series, dict)):
+        tqdm_write(f"⚠️ Erro grave: tipo inesperado em safe_split: {type(nc_data)}")
+        return [default]
+
+    content = str(nc_data.get(col_name, default)).strip()
+    if not content or content.lower() == "nan":
+        if col_name in ["ID da não conformidade", "Não Conformidade"]:
+            return []
+        return [default]
+
+    return [item.strip() for item in content.split(";")]
+
+
+def gerar_secao_nao_conformidades_constatadas(doc, row: dict, nao_conformidades_df: pd.DataFrame, FOTOS_DIR: str):
+    """
+    Gera a seção '3. RESULTADO DAS VISTORIAS DAS NÃO CONFORMIDADES PENDENTES'
+    com base nas informações da planilha.
+    """
+    id_fiscalizacao = row["ID da Fiscalização"]
+
+    nc_fiscalizacao = nao_conformidades_df[
+        nao_conformidades_df["ID da Fiscalização"] == id_fiscalizacao
+    ].copy()
+
+    adicionar_titulo_secao(doc, "3. RESULTADO DAS VISTORIAS DAS NÃO CONFORMIDADES PENDENTES")
 
     adicionar_paragrafo_justificado(
         doc,
-        "A seguir, apresentam-se as não conformidades registradas nos diversos terminais fiscalizados:",
+        (
+            "Estão registrados para cada Terminal Rodoviário os resultados da verificação pela Arpe das ações "
+            "desenvolvidas pela SOCICAM, constantes da Carta SAP/PER/ARPE N° XXXX/XXXX e Carta SAP/PER/ARPE N° XXX/XXXX, "
+            "para solucionar as Não Conformidades ainda pendentes apresentadas no Relatório de Fiscalização Técnico-"
+            "Operacional ARPE/CTR nº XX/XXXX. Monitoramento do Processo Arpe/CTR XX/XXXX (Item X)."
+        ),
     )
 
-    id_fisc = row["ID da Fiscalização"]
-    nc_fisc = nao_conformidades_df[
-        nao_conformidades_df["ID da Fiscalização"] == id_fisc
-    ]
-
-    if "Terminal" not in nc_fisc.columns:
+    if "Terminal" not in nc_fiscalizacao.columns:
         adicionar_paragrafo_justificado(
-            doc, "⚠️ Coluna 'Terminal' não encontrada na planilha de não conformidades."
+            doc,
+            "⚠️ Coluna 'Terminal' não encontrada na planilha de não conformidades."
         )
         return
 
+    id_arpe_col = "ID da não conformidade"
     num_terminal = 1
-    for terminal, grupo_terminal in nc_fisc.groupby("Terminal"):
-        if "(" in terminal and ")" in terminal:
-            sigla_terminal = terminal.split("(")[-1].replace(")", "").strip()
-        else:
-            sigla_terminal = ""
 
-        # Título do terminal
+    for terminal, grupo_terminal in nc_fiscalizacao.groupby("Terminal"):
         par_terminal = doc.add_paragraph()
-        par_terminal.add_run(f"3.{num_terminal} - {terminal.upper()}").bold = True
+        run_terminal = par_terminal.add_run(f"3.{num_terminal} - {terminal.upper()}")
+        aplicar_estilo_titulo(run_terminal)
 
-        num_nc = 1
-        for nc_id, grupo_nc in grupo_terminal.groupby("Nº"):
-            descricao = grupo_nc["Não Conformidade"].iloc[0]
+        par_terminal.paragraph_format.space_before = Pt(12)
+        par_terminal.paragraph_format.space_after = Pt(6)
 
-            par_nc = doc.add_paragraph()
-            run_nc_titulo = par_nc.add_run(
-                f"Não Conformidade {sigla_terminal} {str(num_nc).zfill(2)}"
-            )
-            run_nc_titulo.bold = True
-            run_nc_titulo.underline = True
-            run_nc_titulo.font.size = Pt(10)
-            run_nc_titulo.font.color.rgb = RGBColor(0, 0, 0)
+        for _, nc_data in grupo_terminal.iterrows():
 
-            run_nc_desc = par_nc.add_run(f" – {descricao}")
-            run_nc_desc.font.size = Pt(10)
-            run_nc_desc.font.color.rgb = RGBColor(0, 0, 0)
+            nc_identificadores = _safe_split(nc_data, id_arpe_col, default="")
+            descricoes = _safe_split(nc_data, "Não Conformidade", default="")
+            info_socicam = _safe_split(nc_data, "Informação SOCICAM")
+            constatacao = _safe_split(nc_data, "Constatação")
+            analise_arpe = _safe_split(nc_data, "Análise da Arpe")
 
-            for _, linha in grupo_nc.iterrows():
-                nomes_fotos = (
-                    [f.strip() for f in str(linha["Foto"]).split(";") if f.strip()]
-                    if pd.notna(linha["Foto"])
-                    else []
-                )
-                legendas = (
-                    [l.strip() for l in str(linha["Legenda da Foto"]).split(";")]
-                    if pd.notna(linha["Legenda da Foto"])
-                    else []
-                )
+            num_descricoes = len(descricoes)
+            num_ids = len(nc_identificadores)
+            log_id = f"Terminal: {terminal}"
 
-                for idx, nome_foto in enumerate(nomes_fotos):
-                    foto_path = os.path.join(fotos_dir, nome_foto)
-                    legenda = legendas[idx] if idx < len(legendas) else ""
-                    if os.path.exists(foto_path):
-                        buffer = processar_imagem_para_relatorio(foto_path)
-                        doc.add_picture(buffer, width=Inches(3))
-                        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        aplicar_borda_paragrafo(doc.paragraphs[-1])
-                        adicionar_legenda_formatada(doc, legenda)
-                    elif legenda:
-                        adicionar_paragrafo_justificado(doc, legenda)
+            if num_ids != num_descricoes:
+                if 0 < num_ids < num_descricoes:
+                    nc_identificadores.extend([nc_identificadores[-1]] * (num_descricoes - num_ids))
+                    tqdm_write(f"⚠️ IDs menores que descrições ({log_id}). IDs faltantes replicados.")
+                elif num_ids > num_descricoes:
+                    nc_identificadores = nc_identificadores[:num_descricoes]
+                    tqdm_write(f"⚠️ IDs maiores que descrições ({log_id}). IDs extras ignorados.")
+                elif num_ids == 0 and num_descricoes > 0:
+                    nc_identificadores = ["ID_FALTANDO"] * num_descricoes
+                    tqdm_write(f"⚠️ IDs ausentes ({log_id}). Usado 'ID_FALTANDO' como substituto.")
 
-            num_nc += 1
-
-        # OBSERVAÇÕES IMPORTANTES
-        obs_terminais = observacoes_df[
-            (observacoes_df["ID da Fiscalização"] == id_fisc)
-            & (observacoes_df["Terminal"] == terminal)
-        ]
-        if not obs_terminais.empty:
-            adicionar_titulo_secao(doc, "OBSERVAÇÕES IMPORTANTES:")
-            run_titulo_obs = doc.paragraphs[-1].runs[0]
-            run_titulo_obs.text = run_titulo_obs.text.upper()
-            run_titulo_obs.underline = True
-            run_titulo_obs.font.size = Pt(10)
-
-            num_obs = 1
-            for _, obs in obs_terminais.iterrows():
-                textos_obs = (
-                    [o.strip() for o in str(obs["Observações"]).split(";") if o.strip()]
-                    if pd.notna(obs["Observações"])
-                    else []
-                )
-                nomes_fotos_obs = (
-                    [f.strip() for f in str(obs["Foto"]).split(";") if f.strip()]
-                    if pd.notna(obs["Foto"])
-                    else []
-                )
-                legendas_obs = (
-                    [l.strip() for l in str(obs["Legenda da Foto"]).split(";")]
-                    if pd.notna(obs["Legenda da Foto"])
-                    else []
+            # Montagem da seção por item
+            for i, descricao in enumerate(descricoes):
+                alinhamento_fail = (
+                    "ALINHAMENTO FALHOU! Verifique o uso de ';' em todas as 4 colunas."
                 )
 
-                for i, texto_obs in enumerate(textos_obs):
-                    adicionar_paragrafo_justificado(doc, f"{num_obs}. {texto_obs}")
+                info = info_socicam[i] if i < len(info_socicam) else "Texto não disponível"
+                const = constatacao[i] if i < len(constatacao) else "Texto não disponível"
+                analise = analise_arpe[i] if i < len(analise_arpe) else "Texto não disponível"
 
-                    if i < len(nomes_fotos_obs):
-                        foto_path = os.path.join(fotos_dir, nomes_fotos_obs[i])
-                        legenda_obs = legendas_obs[i] if i < len(legendas_obs) else ""
-                        if os.path.exists(foto_path):
-                            buffer = processar_imagem_para_relatorio(foto_path)
-                            doc.add_picture(buffer, width=Inches(3))
-                            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            aplicar_borda_paragrafo(doc.paragraphs[-1])
-                            if legenda_obs:
-                                adicionar_legenda_formatada(doc, legenda_obs)
-                        elif legenda_obs:
-                            adicionar_legenda_formatada(doc, legenda_obs)
-
-                    num_obs += 1
-
-        # RECOMENDAÇÕES
-        rec_terminais = recomendacoes_df[
-            (recomendacoes_df["ID da Fiscalização"] == id_fisc)
-            & (recomendacoes_df["Terminal"] == terminal)
-        ]
-        if not rec_terminais.empty:
-            adicionar_titulo_secao(doc, "RECOMENDAÇÕES:")
-            run_titulo_rec = doc.paragraphs[-1].runs[0]
-            run_titulo_rec.text = run_titulo_rec.text.upper()
-            run_titulo_rec.underline = True
-            run_titulo_rec.font.size = Pt(10)
-
-            num_rec = 1
-            for _, rec in rec_terminais.iterrows():
-                textos_rec = (
-                    [r.strip() for r in str(rec["Recomendação"]).split(";") if r.strip()]
-                    if pd.notna(rec["Recomendação"])
-                    else []
-                )
-                nomes_fotos_rec = (
-                    [f.strip() for f in str(rec["Foto"]).split(";") if f.strip()]
-                    if pd.notna(rec["Foto"])
-                    else []
-                )
-                legendas_rec = (
-                    [l.strip() for l in str(rec["Legenda da Foto"]).split(";")]
-                    if pd.notna(rec["Legenda da Foto"])
-                    else []
+                max_len = max(
+                    len(descricoes),
+                    len(info_socicam),
+                    len(constatacao),
+                    len(analise_arpe)
                 )
 
-                for i, texto_rec in enumerate(textos_rec):
-                    adicionar_paragrafo_justificado(doc, f"{num_rec}. {texto_rec}")
+                if len(descricoes) != max_len:
+                    info = const = analise = alinhamento_fail
 
-                    if i < len(nomes_fotos_rec):
-                        foto_path = os.path.join(fotos_dir, nomes_fotos_rec[i])
-                        legenda_rec = legendas_rec[i] if i < len(legendas_rec) else ""
-                        if os.path.exists(foto_path):
-                            buffer = processar_imagem_para_relatorio(foto_path)
-                            doc.add_picture(buffer, width=Inches(3))
-                            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            aplicar_borda_paragrafo(doc.paragraphs[-1])
-                            if legenda_rec:
-                                adicionar_legenda_formatada(doc, legenda_rec)
-                        elif legenda_rec:
-                            adicionar_legenda_formatada(doc, legenda_rec)
+                id_final = nc_identificadores[i]
+                _inserir_texto_nc(doc, id_final, descricao)
+                _inserir_linhas_info(doc, info, const, analise)
 
-                    num_rec += 1
+                doc.add_paragraph()
 
         num_terminal += 1
