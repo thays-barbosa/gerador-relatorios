@@ -7,7 +7,7 @@ from utils import (
     aplicar_estilo_corpo,
     aplicar_estilo_titulo
 )
-from typing import Any
+from typing import Any, Dict
 import pandas as pd
 
 try:
@@ -68,12 +68,50 @@ def _safe_split(nc_data: Any, col_name: str, default: str = "Texto não disponí
     return [item.strip() for item in content.split(";")]
 
 
-def gerar_secao_nao_conformidades_constatadas(doc, row: dict, nao_conformidades_df: pd.DataFrame, FOTOS_DIR: str):
+# Função auxiliar para formatar a string das cartas SAP/PER/ARPE
+def _formatar_cartas_sap(cartas: list) -> str:
+    """
+    Formata uma lista de números de cartas no texto dinâmico.
+    Ex: ['123/2025', '456/2025'] -> "constantes da Carta SAP/PER/ARPE N° 123/2025 e Carta SAP/PER/ARPE N° 456/2025,"
+    """
+    if not cartas:
+        return ""
+
+    if len(cartas) == 1:
+        return f"constante da Carta SAP/PER/ARPE N° {cartas[0]}, "
+    
+    # Para mais de uma carta: "Carta N° A, Carta N° B e Carta N° C"
+    cartas_formatadas = [f"Carta SAP/PER/ARPE N° {c}" for c in cartas]
+    
+    partes = cartas_formatadas[:-1]
+    ultima = cartas_formatadas[-1]
+    
+    return f"constantes da {', '.join(partes)} e {ultima}, "
+
+
+def gerar_secao_nao_conformidades_constatadas(
+    doc, 
+    row: dict, 
+    nao_conformidades_df: pd.DataFrame, 
+    FOTOS_DIR: str,
+    processo_info: Dict[str, str]
+):
     """
     Gera a seção '3. RESULTADO DAS VISTORIAS DAS NÃO CONFORMIDADES PENDENTES'
     com base nas informações da planilha.
     """
     id_fiscalizacao = row["ID da Fiscalização"]
+    
+    # --- Extração de Dados Dinâmicos ---
+    processo_ctr = processo_info.get("Processo CTR Nº", "XX/XXXX")
+    
+    # 1. Cartas SAP/PER/ARPE (pode conter múltiplos valores separados por ';')
+    cartas_raw = str(processo_info.get("Carta SAP/PER/ARPE Nº", "")).strip()
+    
+    cartas_list = [c.strip() for c in cartas_raw.split(";") if c.strip() and c.lower() != "nan"]
+    
+    texto_cartas = _formatar_cartas_sap(cartas_list)
+    
 
     nc_fiscalizacao = nao_conformidades_df[
         nao_conformidades_df["ID da Fiscalização"] == id_fiscalizacao
@@ -81,13 +119,14 @@ def gerar_secao_nao_conformidades_constatadas(doc, row: dict, nao_conformidades_
 
     adicionar_titulo_secao(doc, "3. RESULTADO DAS VISTORIAS DAS NÃO CONFORMIDADES PENDENTES")
 
+    # MODIFICAÇÃO: Inserção do texto dinâmico com múltiplas cartas formatadas
     adicionar_paragrafo_justificado(
         doc,
         (
             "Estão registrados para cada Terminal Rodoviário os resultados da verificação pela Arpe das ações "
-            "desenvolvidas pela SOCICAM, constantes da Carta SAP/PER/ARPE N° XXXX/XXXX e Carta SAP/PER/ARPE N° XXX/XXXX, "
+            f"desenvolvidas pela SOCICAM, {texto_cartas}"
             "para solucionar as Não Conformidades ainda pendentes apresentadas no Relatório de Fiscalização Técnico-"
-            "Operacional ARPE/CTR nº XX/XXXX. Monitoramento do Processo Arpe/CTR XX/XXXX (Item X)."
+            f"Operacional ARPE/CTR nº {processo_ctr}."
         ),
     )
 
@@ -134,14 +173,17 @@ def gerar_secao_nao_conformidades_constatadas(doc, row: dict, nao_conformidades_
 
             # Montagem da seção por item
             for i, descricao in enumerate(descricoes):
+                # Usado para fins de depuração se a contagem de ';' falhar
                 alinhamento_fail = (
                     "ALINHAMENTO FALHOU! Verifique o uso de ';' em todas as 4 colunas."
                 )
 
+                # Busca as informações correspondentes ao índice 'i'
                 info = info_socicam[i] if i < len(info_socicam) else "Texto não disponível"
                 const = constatacao[i] if i < len(constatacao) else "Texto não disponível"
                 analise = analise_arpe[i] if i < len(analise_arpe) else "Texto não disponível"
 
+                # Lógica para verificar desalinhamento (como já estava)
                 max_len = max(
                     len(descricoes),
                     len(info_socicam),

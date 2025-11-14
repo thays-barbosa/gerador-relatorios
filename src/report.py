@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Dict
 
 import os
 import sys
@@ -32,15 +32,20 @@ def atualizar_toc_e_converter_para_pdf(caminho_docx: str, caminho_pdf: str) -> b
     Abre o Word via COM, atualiza campos (sumário) e salva como PDF.
     Retorna True em caso de sucesso, False em caso de erro.
     """
+    word = None 
     try:
         word = win32.Dispatch("Word.Application")
         word.Visible = False
+        
+        # Silencia alertas do Word (0 é wdAlertsNone)
+        word.DisplayAlerts = 0 
+        
         doc = word.Documents.Open(caminho_docx)
 
         
         doc.Fields.Update()
         doc.Save()
-       
+        
         doc.SaveAs2(caminho_pdf, FileFormat=17)
 
         doc.Close(SaveChanges=False)
@@ -48,6 +53,11 @@ def atualizar_toc_e_converter_para_pdf(caminho_docx: str, caminho_pdf: str) -> b
         return True
 
     except Exception as exc:
+        # Tentativa de fechar o Word em caso de falha
+        if word is not None:
+            word.DisplayAlerts = -1 # Reativa alertas
+            word.Quit()
+            
         print(f"❌ ERRO ao gerar PDF/Atualizar Sumário (verifique se o Word está instalado): {exc}")
         return False
 
@@ -73,7 +83,7 @@ def gerar_relatorio() -> None:
     # Diretórios e caminhos principais
     FOTOS_DIR = os.path.join(BASE_DIR, "assets")
     RELATORIOS_DIR = os.path.join(BASE_DIR, "reports")
-    CAMINHO_PLANILHA = os.path.join(BASE_DIR, "planilha_fiscalizacao.xlsx")
+    CAMINHO_PLANILHA = os.path.join(BASE_DIR, "planilha_monitoramento.xlsx")
     COLUNA_STATUS = "Relatório Gerado"
 
     # Garante diretórios existirem
@@ -85,16 +95,23 @@ def gerar_relatorio() -> None:
         print("⚠️ A planilha está em uso. Feche-a antes de executar o script.")
         sys.exit(1)
 
-   
-    fiscalizacoes_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Fiscalizações")
+    # Leitura das abas da planilha
+    monitoramento_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Monitoramento")
     nao_conformidades_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Não-conformidades ")
+    processos_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Processos") 
 
-   
-    if COLUNA_STATUS not in fiscalizacoes_df.columns:
-        fiscalizacoes_df[COLUNA_STATUS] = False
-    fiscalizacoes_df[COLUNA_STATUS] = fiscalizacoes_df[COLUNA_STATUS].fillna(False).astype(bool)
+    # MODIFICAÇÃO: Normalização dos nomes das colunas para evitar KeyError
+    processos_df.columns = processos_df.columns.str.strip()
+    
+    # MODIFICAÇÃO: REMOVIDO o bloco de extração processo_info global. 
+    # A extração será feita dentro do loop por ID.
+    
+    # ... (o restante do código de verificação de status e pendentes segue)
+    if COLUNA_STATUS not in monitoramento_df.columns:
+        monitoramento_df[COLUNA_STATUS] = False
+    monitoramento_df[COLUNA_STATUS] = monitoramento_df[COLUNA_STATUS].fillna(False).astype(bool)
 
-    pendentes = fiscalizacoes_df[~fiscalizacoes_df[COLUNA_STATUS]]
+    pendentes = monitoramento_df[~monitoramento_df[COLUNA_STATUS]]
 
     if pendentes.empty:
         print("\n✅ Todos os relatórios já foram gerados,não existe nenhum relatório pendente. Por favor, confira sua planilha.")
@@ -151,11 +168,27 @@ def gerar_relatorio() -> None:
 
     # Itera sobre fiscalizações pendentes
     for idx in tqdm(pendentes.index, desc="Gerando relatórios"):
-        row = fiscalizacoes_df.loc[idx]
+        row = monitoramento_df.loc[idx]
         id_fisc = row["ID da Fiscalização"]
 
+        # MODIFICAÇÃO: FILTRAGEM DINÂMICA DA ABA PROCESSOS PELO ID DA FISCALIZAÇÃO ATUAL
+        processo_info_filtered = processos_df[processos_df["ID da Fiscalização"] == id_fisc]
+        processo_info: Dict[str, str]
+
+        # Verifica se o processo foi encontrado
+        if processo_info_filtered.empty:
+            tqdm.write(f"\n⚠️ Processo SEI/CTR não encontrado para o ID {id_fisc} na aba 'Processos'. Usando valores padrão.")
+            processo_info = {
+                "Processo CTR Nº": "XX/XXXX",
+                "Contrato de Concessão Nº": "X.XXX.XXX/XX",
+                "Processo SEI Nº": "XXXXXXXXXX.XXXXXXXXX/XX"
+            }
+        else:
+            # Pega o primeiro (e esperado único) resultado e converte para dicionário
+            processo_info = processo_info_filtered.iloc[0].to_dict()
+
         doc = Document()
-       
+        
         section = doc.sections[0]
         section.top_margin = Inches(0.25)
 
@@ -165,11 +198,17 @@ def gerar_relatorio() -> None:
         primeiro_paragrafo.paragraph_format.space_before = Pt(0)
         primeiro_paragrafo.paragraph_format.space_after = Pt(0)
 
+        # Texto principal dinâmico
+        processo_ctr = processo_info["Processo CTR Nº"]
+        texto_monitoramento = (
+            f"RELATÓRIO DO {id_fisc}º MONITORAMENTO DAS NÃO CONFORMIDADES DO PROCESSO CTR Nº {processo_ctr}"
+        )
+
         doc.add_paragraph()
-        adicionar_texto_centralizado(doc, "RELATÓRIO DO Xº MONITORAMENTO DAS NÃO CONFORMIDADES DO PROCESSO CTR Nº XX/XXXX")
+        adicionar_texto_centralizado(doc, texto_monitoramento) 
         doc.add_paragraph()
 
-       
+        
         caminho_logo = os.path.join(FOTOS_DIR, NOME_LOGO)
         if os.path.exists(caminho_logo):
             buffer_logo = processar_imagem_para_relatorio(caminho_logo, largura_max=500, qualidade=95)
@@ -183,8 +222,16 @@ def gerar_relatorio() -> None:
             doc,
             "PROCESSO DE FISCALIZAÇÃO TÉCNICO-OPERACIONAL DOS TERMINAIS RODOVIÁRIOS INTERMUNICIPAIS CONCEDIDOS À EMPRESA SOCICAM",
         )
-        adicionar_texto_centralizado(doc, "CONTRATO DE CONCESSÃO DE SERVIÇO PÚBLICO Nº X.XXX.XXX/XX")
-        adicionar_texto_centralizado(doc, "PROCESSO SEI Nº XXXXXXXXXX.XXXXXXXXX/XX")
+        
+        # Contrato de Concessão dinâmico
+        contrato_concessao = processo_info["Contrato de Concessão Nº"]
+        texto_contrato = f"CONTRATO DE CONCESSÃO DE SERVIÇO PÚBLICO Nº {contrato_concessao}"
+        adicionar_texto_centralizado(doc, texto_contrato)
+        
+        # Processo SEI dinâmico
+        processo_sei = processo_info["Processo SEI Nº"]
+        texto_processo_sei = f"PROCESSO SEI Nº {processo_sei}"
+        adicionar_texto_centralizado(doc, texto_processo_sei)
 
         doc.add_paragraph()
 
@@ -197,20 +244,20 @@ def gerar_relatorio() -> None:
 
         
         gerar_secao_introducao(doc, row)
-        gerar_secao_objetivo(doc)
+        gerar_secao_objetivo(doc,row, processo_info, nao_conformidades_df)
 
-        gerar_secao_nao_conformidades_constatadas(doc, row, nao_conformidades_df, FOTOS_DIR)
-        gerar_secao_resumo_nao_conformidades(doc, row, nao_conformidades_df)
-        gerar_secao_consideracoes_finais(doc, row)
+        gerar_secao_nao_conformidades_constatadas(doc, row, nao_conformidades_df, FOTOS_DIR, processo_info)
+        gerar_secao_resumo_nao_conformidades(doc, row, nao_conformidades_df,processo_info)
+        gerar_secao_consideracoes_finais(doc, row, nao_conformidades_df, processo_info)
 
         
         if nao_conformidades_df is not None:
             try:
                 gerar_secao_anexo_fotos(doc, row, nao_conformidades_df, CAMINHO_RAIZ_FOTOS)
             except Exception as exc:
-                print(f"Erro ao gerar Anexo: {exc}")
+                tqdm.write(f"Erro ao gerar Anexo: {exc}") 
 
-       
+        
         nome_arquivo = f"relatorio_{id_fisc}"
         caminho_docx = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.docx")
         caminho_pdf = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.pdf")
@@ -218,22 +265,37 @@ def gerar_relatorio() -> None:
         doc.save(caminho_docx)
         sucesso_pdf = atualizar_toc_e_converter_para_pdf(caminho_docx, caminho_pdf)
 
-        if os.path.exists(caminho_docx):
-            fiscalizacoes_df.at[idx, COLUNA_STATUS] = True
+        # Apenas marca como True se DOCX E PDF foram gerados com sucesso
+        if os.path.exists(caminho_docx) and sucesso_pdf:
+            monitoramento_df.at[idx, COLUNA_STATUS] = True
+        else:
+            tqdm.write(f"⚠️ Falha na conversão de PDF para o relatório {id_fisc}. Status 'Relatório Gerado' mantido como False.")
+
 
     # Formata coluna "Data" (se existir) para dd/mm/YYYY
-    if "Data" in fiscalizacoes_df.columns:
-        fiscalizacoes_df["Data"] = pd.to_datetime(fiscalizacoes_df["Data"], errors="coerce").dt.strftime("%d/%m/%Y")
+    if "Data" in monitoramento_df.columns:
+        monitoramento_df["Data"] = pd.to_datetime(monitoramento_df["Data"], errors="coerce").dt.strftime("%d/%m/%Y")
 
     # Atualiza a planilha (se não estiver em uso)
     if not arquivo_em_uso(CAMINHO_PLANILHA):
-        with pd.ExcelWriter(CAMINHO_PLANILHA, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-            fiscalizacoes_df.to_excel(writer, sheet_name="Fiscalizações", index=False)
-            nao_conformidades_df.to_excel(writer, sheet_name="Não-conformidades ", index=False)
+        try: 
+            with pd.ExcelWriter(CAMINHO_PLANILHA, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+                monitoramento_df.to_excel(writer, sheet_name="Monitoramento", index=False)
+                nao_conformidades_df.to_excel(writer, sheet_name="Não-conformidades ", index=False)
 
-        ajustar_largura_colunas(CAMINHO_PLANILHA)
+            ajustar_largura_colunas(CAMINHO_PLANILHA)
 
-    print("🎉 Relatórios gerados e planilha atualizada com sucesso.")
+            print("\n🎉 Relatórios gerados e planilha atualizada com sucesso.")
+            
+        except PermissionError:
+            print(f"\n❌ ERRO GRAVE: Permissão negada ao salvar a planilha '{CAMINHO_PLANILHA}'. Feche o arquivo!")
+        except Exception as e:
+            print(f"\n❌ ERRO ao salvar a planilha: {e}")
+            
+    else:
+        print("\n❌ ERRO: A planilha não foi atualizada, pois estava em uso na etapa final de salvamento.")
+        print("Verifique manualmente o status dos relatórios e feche a planilha.")
+    
     input("\nExecução concluída. Pressione Enter para sair...")
     return
 

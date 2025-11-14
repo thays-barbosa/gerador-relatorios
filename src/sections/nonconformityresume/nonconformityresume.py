@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 import pandas as pd
 from docx.document import Document
 from docx.shared import Pt, Inches
@@ -6,6 +6,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ALIGN_VERTICAL
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml.shared import OxmlElement
+import re # Necessário para a limpeza do nome do Terminal
 
 from utils import (
     adicionar_titulo_secao,
@@ -89,9 +90,6 @@ def _adaptar_lista(
 ) -> List[str]:
     """
     Garante que a lista tenha o tamanho correto.
-
-    - Se `repetir_valor_unico` for True, repete o valor único até o tamanho-alvo.
-    - Caso contrário, preenche as posições faltantes com `default_val`.
     """
     if len(lista) == tamanho_alvo:
         return lista
@@ -106,19 +104,107 @@ def _adaptar_lista(
     return nova_lista
 
 
+def _formatar_cidades_str(nc_fisc: pd.DataFrame) -> str:
+    """Extrai e formata os nomes dos municípios a partir da coluna 'Terminal'."""
+    terminais_unicos = nc_fisc["Terminal"].dropna().unique()
+    cidades = []
+    
+    for terminal in terminais_unicos:
+        # Remove a parte "Terminal de "
+        nome_limpo = terminal.replace("Terminal de ", "").strip()
+        
+        # Remove a abreviação entre parênteses no final (Ex: "Caruaru (CAR)" -> "Caruaru")
+        nome_limpo = re.sub(r'\s*\([^)]*\)$', '', nome_limpo).strip()
+        
+        if nome_limpo:
+            cidades.append(nome_limpo)
+    
+    cidades = sorted(list(set(cidades)))
+    
+    if len(cidades) > 1:
+        # Formata para 'Cidade A, Cidade B e Cidade C'
+        return ", ".join(cidades[:-1]) + f" e {cidades[-1]}"
+        
+    elif len(cidades) == 1:
+        return cidades[0]
+        
+    return "diversos municípios"
+
+def _formatar_periodo_vistoria(processo_info: Dict[str, str]) -> str:
+    """Extrai e formata os períodos de vistoria separados por ';'."""
+    
+    periodos_raw = str(processo_info.get("Periodo de Vistoria da ARPE", "")).strip()
+    
+    if not periodos_raw or periodos_raw.lower() == 'nan':
+        return "DATA INDEFINIDA"
+        
+    # Divide os períodos pela vírgula
+    periodos = [p.strip() for p in periodos_raw.split(';') if p.strip()]
+    
+    if len(periodos) == 1:
+        return periodos[0]
+    
+    # Formata como 'Período A, Período B e Período C'
+    partes = periodos[:-1]
+    ultima = periodos[-1]
+    
+    return f"{', '.join(partes)} e {ultima}"
+
+def _limpar_string_cabecalho(texto_bruto: str, default: str = "XXX/XXXX") -> str:
+    """
+    Simplifica strings com múltiplos valores (separados por ';', ',')
+    para exibição limpa no cabeçalho da tabela.
+    """
+    texto = str(texto_bruto).strip()
+    if not texto or texto.lower() == 'nan':
+        return default
+    
+    # Substitui delimitadores comuns (;, /) por espaço, depois normaliza múltiplos espaços
+    texto_limpo = re.sub(r'[;,]', ' ', texto)
+    texto_limpo = re.sub(r'\s+', ' ', texto_limpo).strip()
+    
+    return texto_limpo
+
 def gerar_secao_resumo_nao_conformidades(
     doc: Document,
     row: pd.Series,
-    nao_conformidades_df: pd.DataFrame
+    nao_conformidades_df: pd.DataFrame,
+    processo_info: Dict[str, str] # Novo argumento
 ):
     """Gera a seção 4 - Resumo da Situação das Não Conformidades Monitoradas."""
 
+    # --- Extração de dados dinâmicos ---
+    id_fisc = row["ID da Fiscalização"]
+    nc_fisc = nao_conformidades_df[nao_conformidades_df["ID da Fiscalização"] == id_fisc].copy()
+    
+    if nc_fisc.empty:
+        doc.add_paragraph().paragraph_format.space_after = Pt(12)
+        adicionar_titulo_secao(doc, "4. RESUMO DA SITUAÇÃO DAS NÃO CONFORMIDADES MONITORADAS")
+        doc.add_paragraph("Nenhuma não conformidade registrada.")
+        return
+
+    # Dados da aba Processos (processo_info)
+    processo_ctr = processo_info.get("Processo CTR Nº", "XX/XXXX")
+    # MODIFICAÇÃO CHAVE AQUI: Limpar a string da Carta para o cabeçalho
+    carta_sap_per_arpe_bruta = processo_info.get("Carta SAP/PER/ARPE Nº", "XXX/XXXX")
+    carta_sap_per_arpe_limpa = _limpar_string_cabecalho(carta_sap_per_arpe_bruta)
+
+    # 1. (TERMINAL) - Lista de municípios limpos
+    cidades_str = _formatar_cidades_str(nc_fisc) 
+    
+    # 2. (DATA) - Períodos de vistoria formatados
+    periodo_vistoria_str = _formatar_periodo_vistoria(processo_info) 
+    
+    # --- Geração da Seção ---
+    
     doc.add_paragraph().paragraph_format.space_after = Pt(12)
     adicionar_titulo_secao(doc, "4. RESUMO DA SITUAÇÃO DAS NÃO CONFORMIDADES MONITORADAS")
 
+    # Dinamizando o texto introdutório com Terminais e Períodos
     texto_introducao = (
         "O Quadro 1, a seguir, resume os resultados das vistorias da equipe da Arpe nos Terminais Rodoviários "
-        "Intermunicipais concedidos à SOCICAM. As atividades aconteceram em (TERMINAL) no (DATA)."
+        "Intermunicipais concedidos à SOCICAM, as atividades aconteceram nos municípios de "
+        f"{cidades_str} no período de {periodo_vistoria_str}."
     )
     adicionar_paragrafo_justificado(doc, texto_introducao)
 
@@ -130,17 +216,11 @@ def gerar_secao_resumo_nao_conformidades(
     run1 = par_quadro.add_run("Quadro 1 - ")
     aplicar_estilo_corpo(run1, negrito=True)
 
+    # Dinamizando o título do quadro
     run2 = par_quadro.add_run(
-        "Resumo da Situação das Não Conformidades Pendentes - RELATÓRIO ARPE/CTR 02/2024"
+        f"Resumo da Situação das Não Conformidades Pendentes - RELATÓRIO ARPE/CTR {processo_ctr}"
     )
     aplicar_estilo_corpo(run2, negrito=True)
-
-    id_fisc = row["ID da Fiscalização"]
-    nc_fisc = nao_conformidades_df[nao_conformidades_df["ID da Fiscalização"] == id_fisc].copy()
-
-    if nc_fisc.empty:
-        doc.add_paragraph("Nenhuma não conformidade registrada.")
-        return
 
     # Criação da tabela principal
     tabela = doc.add_table(rows=1, cols=5)
@@ -149,15 +229,16 @@ def gerar_secao_resumo_nao_conformidades(
 
     col_widths = [Inches(1.0), Inches(2.2), Inches(1.9), Inches(1.5), Inches(0.8)]
 
-    cabecalho = tabela.rows[0].cells
+    # MODIFICAÇÃO: Dinamizando o cabeçalho das colunas com os dados do Processo
     headers = [
         "TERMINAL",
-        "NÃO CONFORMIDADE\nRELATÓRIO ARPE/CTR\nXX/XXXX",
-        "INFORMAÇÃO SOCICAM\nCarta SAP/PER/ARPE\nXXX/XXXX",
-        "VISTORIA DA ARPE\n[DATAS]",
+        f"NÃO CONFORMIDADE\nRELATÓRIO ARPE/CTR\n{processo_ctr}", # Processo CTR Nº
+        f"INFORMAÇÃO SOCICAM\nCarta SAP/PER/ARPE\n{carta_sap_per_arpe_limpa}", # Carta SAP/PER/ARPE Nº (LIMPA)
+        f"VISTORIA DA ARPE\n{periodo_vistoria_str}", # Período de Vistoria da ARPE
         "SITUAÇÃO"
     ]
 
+    cabecalho = tabela.rows[0].cells
     for i, titulo in enumerate(headers):
         cabecalho[i].text = titulo
         _aplicar_cor_fundo_celula(cabecalho[i])
@@ -168,7 +249,7 @@ def gerar_secao_resumo_nao_conformidades(
                 _aplicar_estilo_resumo(par.runs[0], negrito=True)
             par.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # Preenchimento da tabela
+    # Preenchimento da tabela (Lógica mantida, pois está correta)
     current_row_index = 1
 
     for terminal_bruto, grupo in nc_fisc.groupby("Terminal"):

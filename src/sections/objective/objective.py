@@ -1,22 +1,68 @@
 from docx.document import Document
+from typing import Dict, Any
+import pandas as pd
+import re
 from utils import adicionar_titulo_secao, adicionar_paragrafo_justificado
 
 
-def gerar_secao_objetivo(doc: Document, row=None):
+def gerar_secao_objetivo(doc: Document, row: Dict[str, Any], processo_info: Dict[str, str], nao_conformidades_df: pd.DataFrame):
     """
-    Gera a seção 2 - OBJETIVO do relatório.
+    Gera a seção 2 - OBJETIVO do relatório, usando dados dinâmicos da fiscalização e do processo.
     """
 
-    num_monitoramento = "Xº"
-    ctr_original = "xx/xxxx"
-    doc_sei = "xxxxxxx"
-    cidades_str = "xxxxxxxx, xxxxxxxxx, e xxxxxxxxx"
+    # --- 1. Extração de Variáveis Simples ---
+    
+    # {num_monitoramento}: ID da Fiscalização (formato Xº)
+    id_fisc = str(row.get("ID da Fiscalização", "X"))
+    num_monitoramento = f"{id_fisc}º" if id_fisc.isdigit() else id_fisc
+    
+    # {ctr_original}: Processo CTR Nº
+    ctr_original = processo_info.get("Processo CTR Nº", "xx/xxxx")
+    
+    # {doc_sei}: Doc. SEI Nº
+    # MODIFICAÇÃO: Usando a chave correta 'Doc. SEI Nº' da aba Processos
+    doc_sei = processo_info.get("Doc. SEI Nº", "xxxxxxx")
 
-    if row is not None:
-        num_monitoramento = str(row.get("Num Monitoramento", num_monitoramento))
-        ctr_original = str(row.get("CTR Original", ctr_original))
-        doc_sei = str(row.get("Doc SEI Original", doc_sei))
 
+    # --- 2. Extração e Formatação de {cidades_str} ---
+    
+    # Filtra as não-conformidades apenas para o ID da fiscalização atual
+    nao_conformidades_fisc = nao_conformidades_df[
+        nao_conformidades_df["ID da Fiscalização"] == row["ID da Fiscalização"]
+    ]
+
+    # Extrai os nomes únicos dos Terminais
+    terminais_unicos = nao_conformidades_fisc["Terminal"].dropna().unique()
+
+    # Limpa e extrai apenas o nome do município
+    cidades = []
+    for terminal in terminais_unicos:
+        # Remove a parte "Terminal de "
+        nome_limpo = terminal.replace("Terminal de ", "").strip()
+        
+        # Remove a abreviação entre parênteses no final (Ex: "Caruaru (CAR)" -> "Caruaru")
+        nome_limpo = re.sub(r'\s*\([^)]*\)$', '', nome_limpo).strip()
+        
+        if nome_limpo:
+            cidades.append(nome_limpo)
+    
+    # Remove duplicatas e formata como string
+    cidades = sorted(list(set(cidades)))
+    
+    if len(cidades) > 1:
+        # Formata para 'Cidade A, Cidade B e Cidade C'
+        cidades_str = ", ".join(cidades[:-1]) + f" e {cidades[-1]}"
+        
+    elif len(cidades) == 1:
+        cidades_str = cidades[0]
+        
+    else:
+        # Fallback se não encontrar cidades
+        cidades_str = "diversos municípios" 
+    
+    
+    # --- 3. Geração da Seção ---
+    
     adicionar_titulo_secao(doc, "2. OBJETIVO")
 
     texto_objetivo = (
