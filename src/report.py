@@ -253,7 +253,7 @@ def gerar_relatorio() -> None:
         
         if nao_conformidades_df is not None:
             try:
-                gerar_secao_anexo_fotos(doc, row, nao_conformidades_df, CAMINHO_RAIZ_FOTOS)
+                gerar_secao_anexo_fotos(doc, row, nao_conformidades_df, CAMINHO_RAIZ_FOTOS, processo_info)
             except Exception as exc:
                 tqdm.write(f"Erro ao gerar Anexo: {exc}") 
 
