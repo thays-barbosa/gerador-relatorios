@@ -1,7 +1,10 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 import io
 import os
 from datetime import datetime
+from difflib import SequenceMatcher
+import re 
+import unicodedata
 
 import pandas as pd
 from PIL import Image
@@ -13,20 +16,173 @@ from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.shared import Pt, RGBColor, Inches
 
-# Constantes de layout e cores
 LARGURA_PADRAO_IN = Inches(6)
 LARGURA_IMAGEM_LADO_A_LADO = Inches(3.25)
 ALTURA_IMAGEM_LADO_A_LADO = Inches(2.7)
-
 _COR_CINZA_SOMBRA_HEX = "BFBFBF"
 _COR_PRETO_RGB = (0, 0, 0)
 
+def carregar_base_nc(caminho_base: str) -> pd.DataFrame:
+    try:
+        # Lê como string para manter formatação de IDs (ex: 02.1)
+        df = pd.read_excel(caminho_base, sheet_name="BASE", dtype=str)
+        df.columns = df.columns.str.strip()
+        df = df.dropna(how='all')
+        
+        cols_texto = ["TIPO_DOC", "PROCESSO", "Evidencia_Agregada", "Evidencia_Desagregada", "Localização/VIA", "Item", "Status-ARPE"]
+        for col in cols_texto:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
+        
+        print(f"📂 Base carregada: {len(df)} linhas.")
+        return df
+    except Exception as e:
+        print(f"❌ Erro Base: {e}")
+        return pd.DataFrame()
 
-# -------------------------
-# Utilitários de formatação
-# -------------------------
+def _remover_acentos(texto: str) -> str:
+    try:
+        return "".join([c for c in unicodedata.normalize('NFKD', str(texto)) if not unicodedata.combining(c)])
+    except: return str(texto)
+
+def _limpar_texto_para_match(texto: str) -> str:
+    t = _remover_acentos(str(texto)).lower().strip()
+    # Remove termos de referência a fotos que atrapalham o match
+    t = re.sub(r"\(?\s*ver\s+fotos?.*?\)?", " ", t)
+    t = re.sub(r"\(?\s*vide\s+fotos?.*?\)?", " ", t)
+    t = re.sub(r"\(?\s*fotos?\s+\d+.*?\)?", " ", t)
+    t = re.sub(r"conforme\s+evidenciado.*", " ", t)
+    t = re.sub(r"[^\w\s]", " ", t)
+    return " ".join(t.split())
+
+def encontrar_dados_na_base(
+    texto_busca: str,
+    df_base: pd.DataFrame,
+    ano_user: str,
+    proc_user: str,
+    monit_user: str,
+    terminal_user: str = None
+) -> Dict[str, str]:
+    
+    texto_limpo = _limpar_texto_para_match(texto_busca)
+
+    resultado = {
+        "id": "ID_NAO_ENCONTRADO",
+        "descricao": texto_busca, 
+        "situacao": "Não Identificado",
+        "data_vistoria": ""
+    }
+
+    if df_base.empty or not texto_limpo: return resultado
+
+    # --- 1. FILTROS ---
+    df_filt = df_base.copy()
+
+    if "Ano" in df_filt.columns and ano_user:
+        try:
+            df_filt = df_filt[pd.to_numeric(df_filt["Ano"], errors='coerce') == int(ano_user)]
+        except: pass
+
+    if "PROCESSO" in df_filt.columns and proc_user:
+        p_clean = proc_user.replace("CTR", "").strip()
+        df_filt = df_filt[df_filt["PROCESSO"].str.upper().str.contains(p_clean, na=False)]
+
+    if "TIPO_DOC" in df_filt.columns and monit_user:
+        mask_monit = df_filt["TIPO_DOC"].str.upper().str.contains("MONIT", na=False)
+        mask_num = df_filt["TIPO_DOC"].str.contains(str(monit_user), na=False)
+        df_filt = df_filt[mask_monit & mask_num]
+
+    if terminal_user and "Localização/VIA" in df_filt.columns:
+        t_clean = str(terminal_user).upper()
+        t_clean = re.sub(r"TERMINAL\s+(RODOVIÁRIO\s+)?(DE|DO|DA)\s+", "", t_clean)
+        t_clean = t_clean.split("(")[0].strip()
+        
+        if "RECIFE" in t_clean or "TIP" in t_clean:
+             df_filt = df_filt[df_filt["Localização/VIA"].str.upper().str.contains("RECIFE|TIP", regex=True, na=False)]
+        else:
+             df_filt = df_filt[df_filt["Localização/VIA"].str.upper().str.contains(t_clean, na=False)]
+
+    if df_filt.empty: return resultado
+
+    # --- 2. MATCH (BUSCA INVERSA + FUZZY) ---
+    melhor_ratio = 0
+    melhor_row = None
+    
+    cols_busca = [c for c in ["Evidencia_Agregada", "Evidencia_Desagregada"] if c in df_filt.columns]
+
+    for _, row in df_filt.iterrows():
+        txt_base_raw = " ".join([str(row.get(c, "")) for c in cols_busca])
+        txt_base_limpo = _limpar_texto_para_match(txt_base_raw)
+        
+        # Legenda contida na Base (Ex: "Infiltração" contido em "Infiltração grave no teto")
+        if texto_limpo in txt_base_limpo and len(texto_limpo) > 4:
+            ratio = 1.0
+        # Base contida na Legenda
+        elif txt_base_limpo in texto_limpo and len(txt_base_limpo) > 4:
+            ratio = 1.0
+        # Fuzzy
+        else:
+            ratio = SequenceMatcher(None, texto_limpo, txt_base_limpo).ratio()
+            
+        if ratio > melhor_ratio:
+            melhor_ratio = ratio
+            melhor_row = row
+
+    # --- 3. AGRUPAMENTO DE ITENS ---
+    if melhor_row is not None and melhor_ratio > 0.20:
+        
+        # Pega o agrupador (Evidencia_Agregada)
+        evidencia_chave = str(melhor_row.get("Evidencia_Agregada", "")).strip()
+        
+        if not evidencia_chave or evidencia_chave.lower() == 'nan':
+            df_grupo = pd.DataFrame([melhor_row])
+        else:
+            # Pega todos os itens com a mesma Evidencia Agregada neste contexto
+            df_grupo = df_filt[df_filt["Evidencia_Agregada"] == evidencia_chave].sort_values(by="Item")
+
+        # Define o ID Principal (ex: "02.1" vira "02")
+        primeiro_item = str(df_grupo.iloc[0]["Item"])
+        if "." in primeiro_item and primeiro_item.replace(".","").isdigit():
+            id_final = primeiro_item.split(".")[0]
+        else:
+            id_final = primeiro_item
+
+        # Monta o texto com lista
+        linhas_texto = []
+        
+        # Título
+        if evidencia_chave and evidencia_chave.lower() != 'nan':
+            linhas_texto.append(evidencia_chave)
+        
+        # Itens da lista
+        for _, row_g in df_grupo.iterrows():
+            item_n = str(row_g.get("Item", "")).strip()
+            desag = str(row_g.get("Evidencia_Desagregada", "")).strip()
+            
+            if desag and desag.lower() != 'nan' and desag != evidencia_chave:
+                # Formato: "02.1 - Descrição"
+                linhas_texto.append(f"{item_n} - {desag}")
+        
+        if not linhas_texto:
+            desc_final = texto_busca
+        else:
+            desc_final = "\n".join(linhas_texto)
+
+        resultado = {
+            "id": id_final,
+            "descricao": desc_final,
+            "situacao": str(melhor_row.get("Status-ARPE", "N/A")).strip(),
+            "data_vistoria": formatar_data_df(melhor_row.get("DATA FISC", ""))
+        }
+        print(f"   ✅ Match ({melhor_ratio:.2f}) -> {id_final}")
+    else:
+        pass
+
+    return resultado
+
+# --- FUNÇÕES VISUAIS (Corrigidas: Variável 'par') ---
+
 def _set_run_language(run, lang_code: str = "pt-BR") -> None:
-    """Define o idioma do run para evitar marcações do corretor ortográfico."""
     rPr = run._element.get_or_add_rPr()
     lang = OxmlElement("w:lang")
     lang.set(qn("w:val"), lang_code)
@@ -34,21 +190,15 @@ def _set_run_language(run, lang_code: str = "pt-BR") -> None:
     lang.set(qn("w:bidi"), lang_code)
     rPr.append(lang)
 
-
 def desabilitar_correcao_paragrafo(paragrafo) -> None:
-    """Desativa a verificação ortográfica para o parágrafo informado."""
     pPr = paragrafo._element.get_or_add_pPr()
-
     no_proof = OxmlElement("w:noProof")
     pPr.append(no_proof)
-
     lang = OxmlElement("w:lang")
     lang.set(qn("w:val"), "pt-BR")
     pPr.append(lang)
 
-
 def aplicar_sombreamento_paragrafo(paragrafo, cor_hex: str) -> None:
-    """Aplica sombreamento (shading) a um parágrafo usando cor hexadecimal."""
     pPr = paragrafo._element.get_or_add_pPr()
     shading = OxmlElement("w:shd")
     shading.set(qn("w:val"), "clear")
@@ -56,247 +206,158 @@ def aplicar_sombreamento_paragrafo(paragrafo, cor_hex: str) -> None:
     shading.set(qn("w:fill"), cor_hex)
     pPr.append(shading)
 
-
-# -------------------------
-# Estilos de texto
-# -------------------------
-def aplicar_estilo_texto(
-    run,
-    tamanho: int = 12,
-    negrito: bool = False,
-    fonte: str = "Arial",
-    cor_rgb: Tuple[int, int, int] = (0, 0, 0),
-) -> None:
-    """Aplica estilos básicos a um run (fonte, tamanho, peso, cor e idioma)."""
+def aplicar_estilo_texto(run, tamanho: int = 12, negrito: bool = False, fonte: str = "Arial", cor_rgb: Tuple[int, int, int] = (0, 0, 0)) -> None:
     run.font.name = fonte
-    # garante compatibilidade com fontes em eastAsia (Word)
     run._element.rPr.rFonts.set(qn("w:eastAsia"), fonte)
     run.font.size = Pt(tamanho)
     run.bold = negrito
     run.font.color.rgb = RGBColor(*cor_rgb)
     _set_run_language(run, "pt-BR")
 
-
 def aplicar_estilo_corpo(run, negrito: bool = False) -> None:
-    """Estilo padrão do corpo: Arial 11pt."""
     aplicar_estilo_texto(run, tamanho=11, negrito=negrito, fonte="Arial")
 
-
 def aplicar_estilo_titulo(run, cor_rgb: Tuple[int, int, int] = _COR_PRETO_RGB) -> None:
-    """Estilo padrão para títulos de seção: Arial 12pt negrito."""
     aplicar_estilo_texto(run, tamanho=12, negrito=True, fonte="Arial", cor_rgb=cor_rgb)
 
-
-# -------------------------
-# Parágrafos / textos
-# -------------------------
 def adicionar_paragrafo_justificado(doc: Document, texto: str, negrito: bool = False):
-    """Adiciona parágrafo justificado com estilo do corpo (retorna o parágrafo)."""
-    paragrafo = doc.add_paragraph()
-    paragrafo.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
-    run = paragrafo.add_run(texto)
+    par = doc.add_paragraph() # Definido como 'par'
+    par.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
+    run = par.add_run(texto)
     aplicar_estilo_corpo(run, negrito=negrito)
-    return paragrafo
+    return par # Retorna 'par'
 
-
-def adicionar_texto_centralizado(
-    doc: Document, texto: str, tamanho_fonte: int = 12, negrito: bool = True
-):
-    """Adiciona parágrafo centralizado (usado na capa e assinaturas)."""
-    paragraph = doc.add_paragraph()
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = paragraph.add_run(texto)
-
+def adicionar_texto_centralizado(doc: Document, texto: str, tamanho_fonte: int = 12, negrito: bool = True):
+    par = doc.add_paragraph() # Definido como 'par'
+    par.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = par.add_run(texto)
     if tamanho_fonte == 12 and negrito:
         aplicar_estilo_titulo(run)
     elif tamanho_fonte == 11:
         aplicar_estilo_corpo(run, negrito=negrito)
     else:
         aplicar_estilo_texto(run, tamanho_fonte, negrito, fonte="Arial")
+    desabilitar_correcao_paragrafo(par)
+    return par # Retorna 'par'
 
-    desabilitar_correcao_paragrafo(paragraph)
-    return paragraph
-
-
-# -------------------------
-# Parágrafos compactos (info)
-# -------------------------
 def adicionar_paragrafo_info_compacta(doc: Document, titulo: str, conteudo: str):
-    """Adiciona parágrafo no formato 'Título: Conteúdo' com espaçamento compacto."""
     par = doc.add_paragraph()
     par.paragraph_format.space_before = Pt(0)
     par.paragraph_format.space_after = Pt(0)
     par.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
     par.paragraph_format.line_spacing = Pt(13)
-
     run_titulo = par.add_run(titulo)
     aplicar_estilo_corpo(run_titulo, negrito=True)
-
     run_conteudo = par.add_run(conteudo)
     aplicar_estilo_corpo(run_conteudo, negrito=False)
-
     par.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
     return par
 
-
 def aplicar_estilo_paragrafo_compacto(paragrafo) -> None:
-    """Aplica formatação compacta a um parágrafo (sem alterar conteúdo)."""
     paragrafo.paragraph_format.space_before = Pt(0)
     paragrafo.paragraph_format.space_after = Pt(0)
     paragrafo.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
     paragrafo.paragraph_format.line_spacing = Pt(13)
 
-
-# -------------------------
-# Títulos/Seções
-# -------------------------
-def adicionar_titulo_secao(
-    doc: Document, texto: str, nivel_heading: int = 1, cor_rgb: Tuple[int, int, int] = _COR_PRETO_RGB, aplicar_sombra: bool = False
-):
-    """
-    Adiciona um título de seção usando doc.add_heading (para sumário).
-    Mantém compatibilidade caso add_heading falhe.
-    """
+def adicionar_titulo_secao(doc: Document, texto: str, nivel_heading: int = 1, cor_rgb: Tuple[int, int, int] = _COR_PRETO_RGB, aplicar_sombra: bool = False):
     try:
         par = doc.add_heading(level=nivel_heading)
-    except Exception as exc:
-        print(f"Aviso: erro aplicando heading {nivel_heading}. Usando parágrafo. Erro: {exc}")
+    except Exception:
         par = doc.add_paragraph()
-
     run = par.add_run(texto)
     aplicar_estilo_titulo(run, cor_rgb=cor_rgb)
-
     if aplicar_sombra:
         aplicar_sombreamento_paragrafo(par, _COR_CINZA_SOMBRA_HEX)
         par.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        par.paragraph_format.space_after = Pt(6)
-    else:
-        par.paragraph_format.space_after = Pt(6)
-
+    par.paragraph_format.space_after = Pt(6)
     run.font.all_caps = True
     desabilitar_correcao_paragrafo(par)
     return par
 
-
 def adicionar_texto_contexto(doc: Document, contexto_tupla: Tuple[str, str]):
-    """
-    Adiciona parágrafo com o contexto: TERMINAL (título em caixa alta) + texto restante.
-    contexto_tupla = (terminal, texto_restante)
-    """
     terminal, texto_restante = contexto_tupla
     par = doc.add_paragraph()
     par.paragraph_format.space_before = Pt(12)
     par.paragraph_format.space_after = Pt(6)
     par.alignment = WD_ALIGN_PARAGRAPH.LEFT
-
     run_terminal = par.add_run(terminal)
     aplicar_estilo_titulo(run_terminal)
     run_terminal.font.all_caps = True
-
     desabilitar_correcao_paragrafo(par)
-
     run_restante = par.add_run(texto_restante)
     aplicar_estilo_corpo(run_restante, negrito=False)
     return par
 
-
 def _adicionar_contexto_nc(doc: Document, nc_id: str, constatacao: str):
-    """Adiciona o parágrafo de contexto para uma NC: 'ID - constatação'."""
     par = doc.add_paragraph()
     par.paragraph_format.space_before = Pt(12)
     par.paragraph_format.space_after = Pt(6)
     par.alignment = WD_ALIGN_PARAGRAPH.LEFT
-
     run_id = par.add_run(f"{nc_id.strip()}")
     aplicar_estilo_titulo(run_id)
-
-    run_constatacao = par.add_run(f" - {constatacao.strip()}")
+    
+    # Pega apenas a primeira linha para o cabeçalho da foto
+    texto_limpo = constatacao.split('\n')[0].strip()
+    run_constatacao = par.add_run(f" - {texto_limpo}")
+    
     aplicar_estilo_corpo(run_constatacao, negrito=False)
-
     desabilitar_correcao_paragrafo(par)
     return par
 
-
 def adicionar_texto_esquerda(doc: Document, texto: str, tamanho_fonte: int = 11, negrito: bool = False, compacto: bool = False):
-    """Adiciona parágrafo alinhado à esquerda (opção compacto para remover espaçamentos)."""
-    paragraph = doc.add_paragraph()
+    par = doc.add_paragraph()
     if compacto:
-        paragraph.paragraph_format.space_before = Pt(0)
-        paragraph.paragraph_format.space_after = Pt(0)
-
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    run = paragraph.add_run(texto)
-
+        par.paragraph_format.space_before = Pt(0)
+        par.paragraph_format.space_after = Pt(0)
+    par.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    run = par.add_run(texto)
     if tamanho_fonte == 11:
         aplicar_estilo_corpo(run, negrito=negrito)
     else:
         aplicar_estilo_texto(run, tamanho_fonte, negrito)
+    return par
 
-    return paragraph
-
-
-# -------------------------
-# Data / Planilha
-# -------------------------
 def formatar_data_df(data_value) -> str:
-    """
-    Formata um valor de data para 'dd/mm/YYYY'.
-    Aceita datetime, strings no formato 'YYYY-MM-DD' ou outras strings.
-    Retorna string vazia para NaNs.
-    """
-    if pd.isna(data_value):
+    if pd.isna(data_value) or str(data_value).lower() == 'nan':
         return ""
-
     if isinstance(data_value, datetime):
         return data_value.strftime("%d/%m/%Y")
-
     if isinstance(data_value, str):
         try:
             return datetime.strptime(data_value.split()[0], "%Y-%m-%d").strftime("%d/%m/%Y")
         except ValueError:
-            # se não estiver no formato YYYY-MM-DD, retorna tal como veio
             return data_value
-
     return str(data_value)
 
-
 def ajustar_largura_colunas(caminho_planilha: str) -> None:
-    """Ajusta a largura das colunas de uma planilha com base no conteúdo."""
-    wb = load_workbook(caminho_planilha)
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        for coluna in ws.columns:
-            max_length = 0
-            coluna_letra = coluna[0].column_letter
-
-            for celula in coluna:
-                try:
-                    if celula.value:
-                        max_length = max(max_length, len(str(celula.value)))
-                except Exception:
-                    # ignora células problemáticas
-                    pass
-
-            ajuste = max_length + 2
-            ws.column_dimensions[coluna_letra].width = ajuste
-
-    wb.save(caminho_planilha)
-
+    try:
+        wb = load_workbook(caminho_planilha)
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            for coluna in ws.columns:
+                max_length = 0
+                coluna_letra = coluna[0].column_letter
+                for celula in coluna:
+                    try:
+                        if celula.value:
+                            max_length = max(max_length, len(str(celula.value)))
+                    except Exception:
+                        pass
+                ws.column_dimensions[coluna_letra].width = max_length + 2
+        wb.save(caminho_planilha)
+    except Exception:
+        pass
 
 def arquivo_em_uso(caminho: str) -> bool:
-    """Retorna True se o arquivo estiver em uso/aberto (PermissionError ao renomear)."""
+    if not os.path.exists(caminho):
+        return False
     try:
         os.rename(caminho, caminho)
         return False
     except PermissionError:
         return True
 
-
-# -------------------------
-# Bordas e legendas
-# -------------------------
 def aplicar_borda_paragrafo(paragraph) -> None:
-    """Aplica borda simples em um parágrafo via XML."""
     p = paragraph._element
     pPr = p.get_or_add_pPr()
     borders = OxmlElement("w:pBdr")
@@ -309,240 +370,116 @@ def aplicar_borda_paragrafo(paragraph) -> None:
         borders.append(border)
     pPr.append(borders)
 
-
 def adicionar_legenda_formatada(doc: Document, texto: str) -> None:
-    """Adiciona legenda centralizada com borda (usado em anexos/imagens)."""
     par = doc.add_paragraph()
     run = par.add_run(texto)
     aplicar_estilo_texto(run, tamanho=10, fonte="Arial", cor_rgb=(90, 90, 90))
     par.alignment = WD_ALIGN_PARAGRAPH.CENTER
     aplicar_borda_paragrafo(par)
 
-
-# -------------------------
-# Processamento de imagens
-# -------------------------
 def processar_imagem_para_relatorio(caminho_imagem: str, largura_max: int = 1024, qualidade: int = 80) -> Optional[io.BytesIO]:
-    """
-    Abre, converte (para RGB), redimensiona (se necessário) e retorna um buffer JPEG.
-    Em caso de erro retorna None e imprime uma mensagem no console.
-    """
     if not os.path.exists(caminho_imagem):
-        print(f"ERRO DE FOTO (processar_imagem): Arquivo não encontrado: {caminho_imagem}")
         return None
-
     try:
         img = Image.open(caminho_imagem)
     except Exception as exc:
-        print(f"ERRO DE FOTO (processar_imagem): Não foi possível abrir '{caminho_imagem}'. Erro: {exc}")
+        print(f"Erro abrindo imagem '{caminho_imagem}': {exc}")
         return None
-
-    # garante modo RGB para salvar como JPEG
     if img.mode != "RGB":
         img = img.convert("RGB")
-
-    # redimensiona proporcionalmente se a largura for maior que largura_max
     if img.width > largura_max:
         proporcao = largura_max / float(img.width)
         altura_nova = int(float(img.height) * proporcao)
         img = img.resize((largura_max, altura_nova), Image.LANCZOS)
-
     buffer = io.BytesIO()
     img.save(buffer, format="JPEG", quality=qualidade, optimize=True)
     buffer.seek(0)
     return buffer
 
-
 def adicionar_imagem(doc: Document, buffer_imagem: Optional[io.BytesIO], largura_in: Optional[Inches] = None, altura_in: Optional[Inches] = None) -> None:
-    """Insere imagem a partir de buffer no documento e centraliza o parágrafo."""
     largura_final = largura_in if largura_in is not None else LARGURA_PADRAO_IN
-    paragrafo = doc.add_paragraph()
-
+    par = doc.add_paragraph()
     if buffer_imagem:
         try:
             if altura_in is not None:
-                paragrafo.add_run().add_picture(buffer_imagem, width=largura_final, height=altura_in)
+                par.add_run().add_picture(buffer_imagem, width=largura_final, height=altura_in)
             else:
-                paragrafo.add_run().add_picture(buffer_imagem, width=largura_final)
+                par.add_run().add_picture(buffer_imagem, width=largura_final)
         except Exception as exc:
-            paragrafo.add_run(f"Erro ao inserir imagem: {exc}")
+            par.add_run(f"Erro ao inserir imagem: {exc}")
     else:
-        paragrafo.add_run("🚫 Imagem indisponível.")
-
-    paragrafo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        par.add_run("🚫 Imagem indisponível.")
+    par.alignment = WD_ALIGN_PARAGRAPH.CENTER
     doc.add_paragraph()
 
-
-# -------------------------
-# Bordas em células
-# -------------------------
 def set_cell_border(cell, **kwargs) -> None:
-    """
-    Define bordas de célula via XML.
-    Uso: set_cell_border(cell, top={'val':'single','sz':'4'}, left={...}, ...)
-    """
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
-
     tblBorders = tcPr.first_child_found_in("w:tcBorders")
     if tblBorders is None:
         tblBorders = OxmlElement("w:tcBorders")
         tcPr.append(tblBorders)
-
     for border_name, attrs in kwargs.items():
         if border_name in ("top", "left", "bottom", "right", "insideH", "insideV"):
             border_element = OxmlElement(f"w:{border_name}")
             for k, v in attrs.items():
                 border_element.set(qn(f"w:{k}"), str(v))
-
             old_border = tblBorders.find(qn(f"w:{border_name}"))
             if old_border is not None:
                 tblBorders.remove(old_border)
-
             tblBorders.append(border_element)
 
-
 def adicionar_legenda_formatada_na_celula(cell, texto: str) -> None:
-    """Adiciona legenda formatada dentro de uma célula de tabela (substitui conteúdo antigo)."""
+    if not cell.paragraphs:
+        cell.add_paragraph()
     par = cell.paragraphs[0]
-
-    # limpa conteúdo anterior (se houver)
     if len(par.runs) > 0 or par.text.strip() != "":
         try:
             par.clear()
         except Exception:
-            # se não suportar clear, recria parágrafo (fallback)
-            cell._tc.get_or_add_tcPr()  # noop para evitar lint
+            cell._tc.get_or_add_tcPr()
             par = cell.paragraphs[0]
-
     run = par.add_run(texto)
     aplicar_estilo_texto(run, tamanho=10, fonte="Arial", cor_rgb=(90, 90, 90))
     par.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-
-# -------------------------
-# Inserção de imagens lado a lado
-# -------------------------
-def adicionar_duas_imagens_lado_a_lado(
-    doc: Document,
-    fotos_dir: str,
-    nome_foto1: str,
-    legenda1: str,
-    nome_foto2: Optional[str] = None,
-    legenda2: Optional[str] = None,
-    contexto_nc_tupla: Optional[Tuple[str, str, str]] = None,
-) -> None:
-    """
-    Insere uma tabela 2x2 contendo uma ou duas imagens com legendas.
-    Se nome_foto2 for None, a imagem ocupa as duas colunas (centralizada).
-    Se contexto_nc_tupla for fornecido, insere o contexto antes (ID - constatação).
-    """
+def adicionar_duas_imagens_lado_a_lado(doc: Document, fotos_dir: str, nome_foto1: str, legenda1: str, nome_foto2: Optional[str] = None, legenda2: Optional[str] = None, contexto_nc_tupla: Optional[Tuple[str, str, str]] = None) -> None:
     if contexto_nc_tupla:
         _, nc_id, constatacao = contexto_nc_tupla
         _adicionar_contexto_nc(doc, nc_id, constatacao)
-
     tabela = doc.add_table(rows=2, cols=2)
     tabela.alignment = WD_TABLE_ALIGNMENT.CENTER
     tabela.style = "Table Grid"
-
-    col_width_lote = LARGURA_IMAGEM_LADO_A_LADO
-    largura_imagem = Inches(3.0)
-
     if nome_foto2 is None:
-        # imagem única — mescla a primeira linha
-        celula_img_mesclada = tabela.cell(0, 0).merge(tabela.cell(0, 1))
-        celula_img_mesclada.width = LARGURA_PADRAO_IN
-
-        celula_legenda_mesclada = tabela.cell(1, 0).merge(tabela.cell(1, 1))
-        celula_legenda_mesclada.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        celula_legenda_mesclada.width = LARGURA_PADRAO_IN
-
-        largura_imagem_final = LARGURA_PADRAO_IN
-        caminho_imagem1 = os.path.join(fotos_dir, nome_foto1)
-        buffer_img1 = processar_imagem_para_relatorio(caminho_imagem1)
-
-        par1 = celula_img_mesclada.paragraphs[0]
-        par1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        if buffer_img1 is not None:
-            try:
-                run1 = par1.add_run()
-                run1.add_picture(buffer_img1, width=largura_imagem_final, height=None)
-            except Exception as exc:
-                par1.add_run(f"Erro ao inserir foto única: {exc}.")
-        else:
-            par1.add_run(f"🚫 Imagem indisponível: {nome_foto1}")
-
-        adicionar_legenda_formatada_na_celula(celula_legenda_mesclada, legenda1)
-
+        c_img = tabela.cell(0, 0).merge(tabela.cell(0, 1))
+        c_img.width = LARGURA_PADRAO_IN
+        c_leg = tabela.cell(1, 0).merge(tabela.cell(1, 1))
+        c_leg.width = LARGURA_PADRAO_IN
+        p = c_img.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        buf = processar_imagem_para_relatorio(os.path.join(fotos_dir, nome_foto1))
+        if buf: p.add_run().add_picture(buf, width=LARGURA_PADRAO_IN)
+        else: p.add_run(f"🚫 {nome_foto1}")
+        adicionar_legenda_formatada_na_celula(c_leg, legenda1)
     else:
-        # duas imagens lado a lado
-        for row_idx in range(2):
-            for col_idx in range(2):
-                cell = tabela.cell(row_idx, col_idx)
-                cell.width = col_width_lote
-            # Ajusta o alinhamento vertical do último cell do loop (comportamento herdado)
-            cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+        for r in range(2):
+            for c in range(2):
+                tabela.cell(r, c).width = LARGURA_IMAGEM_LADO_A_LADO
+        p1 = tabela.cell(0, 0).paragraphs[0]
+        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        b1 = processar_imagem_para_relatorio(os.path.join(fotos_dir, nome_foto1))
+        if b1: p1.add_run().add_picture(b1, width=Inches(3.0), height=ALTURA_IMAGEM_LADO_A_LADO)
+        else: p1.add_run(f"🚫 {nome_foto1}")
+        
+        p2 = tabela.cell(0, 1).paragraphs[0]
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        b2 = processar_imagem_para_relatorio(os.path.join(fotos_dir, nome_foto2))
+        if b2: p2.add_run().add_picture(b2, width=Inches(3.0), height=ALTURA_IMAGEM_LADO_A_LADO)
+        else: p2.add_run(f"🚫 {nome_foto2}")
 
-        # primeira imagem
-        caminho_imagem1 = os.path.join(fotos_dir, nome_foto1)
-        buffer_img1 = processar_imagem_para_relatorio(caminho_imagem1)
-
-        par1 = tabela.cell(0, 0).paragraphs[0]
-        par1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        if buffer_img1 is not None:
-            try:
-                run1 = par1.add_run()
-                run1.add_picture(buffer_img1, width=largura_imagem, height=ALTURA_IMAGEM_LADO_A_LADO)
-            except Exception as exc:
-                par1.add_run(f"Erro ao inserir foto 1: {exc}.")
-        else:
-            par1.add_run(f"🚫 Imagem indisponível: {nome_foto1}")
-
-        # segunda imagem
-        caminho_imagem2 = os.path.join(fotos_dir, nome_foto2)
-        buffer_img2 = processar_imagem_para_relatorio(caminho_imagem2)
-
-        par2 = tabela.cell(0, 1).paragraphs[0]
-        par2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-        if buffer_img2 is not None:
-            try:
-                run2 = par2.add_run()
-                run2.add_picture(buffer_img2, width=largura_imagem, height=ALTURA_IMAGEM_LADO_A_LADO)
-            except Exception as exc:
-                par2.add_run(f"⚠️ Erro ao inserir foto 2: {exc}")
-        else:
-            par2.add_run(f"🚫 Imagem indisponível: {nome_foto2}")
-
-        # legendas
-        cell_legenda1 = tabela.cell(1, 0)
-        cell_legenda1.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        adicionar_legenda_formatada_na_celula(cell_legenda1, legenda1)
-
-        cell_legenda2 = tabela.cell(1, 1)
-        cell_legenda2.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        adicionar_legenda_formatada_na_celula(cell_legenda2, legenda2 or "")
-
+        adicionar_legenda_formatada_na_celula(tabela.cell(1, 0), legenda1)
+        adicionar_legenda_formatada_na_celula(tabela.cell(1, 1), legenda2 or "")
     doc.add_paragraph().paragraph_format.space_after = Pt(12)
 
-
-# -------------------------
-# Helpers de busca/normalização
-# -------------------------
 def _limpar_terminal_para_busca(terminal_nome: str) -> str:
-    """
-    Limpa o nome do Terminal para ser usado como prefixo de busca.
-    Ex.: extrai sigla entre parênteses ou transforma espaços/pontos/hífens em '_'.
-    """
-    if not isinstance(terminal_nome, str):
-        return ""
-
-    if "(" in terminal_nome and ")" in terminal_nome:
-        start = terminal_nome.find("(") + 1
-        end = terminal_nome.find(")")
-        return terminal_nome[start:end].strip().upper()
-
-    return terminal_nome.replace(" ", "_").replace("-", "_").upper()
-
+    return str(terminal_nome).upper().replace(" ", "_")

@@ -5,121 +5,61 @@ from utils import (
     adicionar_titulo_secao,
     adicionar_paragrafo_info_compacta,
     aplicar_estilo_corpo,
-    aplicar_estilo_titulo
+    aplicar_estilo_titulo,
+    encontrar_dados_na_base
 )
 from typing import Any, Dict
 import pandas as pd
 
-try:
-    from tqdm import tqdm
-    tqdm_write = tqdm.write
-except ImportError:
-    tqdm_write = print
-
-
 def _inserir_texto_nc(doc, nc_titulo_identificador: str, descricao: str):
-    """
-    Insere o cabeçalho e a descrição de uma Não Conformidade no documento.
-    """
     paragrafo_nc = doc.add_paragraph()
-
     run_titulo = paragrafo_nc.add_run(f"Não Conformidade {nc_titulo_identificador}")
     aplicar_estilo_corpo(run_titulo, negrito=True)
     run_titulo.underline = True
-    run_titulo.font.color.rgb = RGBColor(0, 0, 0)
-
+    
     run_traco = paragrafo_nc.add_run(" - ")
     aplicar_estilo_corpo(run_traco)
-    run_traco.underline = False
-    run_traco.font.color.rgb = RGBColor(0, 0, 0)
-
-    run_desc = paragrafo_nc.add_run(descricao)
+    
+    run_desc = paragrafo_nc.add_run(str(descricao))
     aplicar_estilo_corpo(run_desc)
-    run_desc.underline = False
-    run_desc.font.color.rgb = RGBColor(0, 0, 0)
-
+    
     paragrafo_nc.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
 
-
-def _inserir_linhas_info(doc, info_socicam: str, constatacao: str, analise_arpe: str):
-    """
-    Insere os blocos de 'Informação', 'Constatação' e 'Análise' de forma compacta.
-    """
-    adicionar_paragrafo_info_compacta(doc, "Informação da SOCICAM: ", info_socicam)
-    adicionar_paragrafo_info_compacta(doc, "Constatação: ", constatacao)
-    adicionar_paragrafo_info_compacta(doc, "Análise da ARPE: ", analise_arpe)
-
-
-def _safe_split(nc_data: Any, col_name: str, default: str = "Texto não disponível") -> list:
-    """
-    Divide os textos de uma coluna (separados por ';') em uma lista limpa.
-    Retorna uma lista contendo um valor padrão se o conteúdo for inválido.
-    """
-    if not isinstance(nc_data, (pd.Series, dict)):
-        tqdm_write(f"⚠️ Erro grave: tipo inesperado em safe_split: {type(nc_data)}")
-        return [default]
-
-    content = str(nc_data.get(col_name, default)).strip()
-    if not content or content.lower() == "nan":
-        if col_name in ["ID da não conformidade", "Não Conformidade"]:
-            return []
-        return [default]
-
-    return [item.strip() for item in content.split(";")]
-
-
-# Função auxiliar para formatar a string das cartas SAP/PER/ARPE
-def _formatar_cartas_sap(cartas: list) -> str:
-    """
-    Formata uma lista de números de cartas no texto dinâmico.
-    Ex: ['123/2025', '456/2025'] -> "constantes da Carta SAP/PER/ARPE N° 123/2025 e Carta SAP/PER/ARPE N° 456/2025,"
-    """
-    if not cartas:
-        return ""
-
-    if len(cartas) == 1:
-        return f"constante da Carta SAP/PER/ARPE N° {cartas[0]}, "
+def _inserir_linhas_info(doc, info_socicam: str, constatacao_monit: str, analise_arpe: str):
+    if str(info_socicam).lower() in ['nan', 'none', '']: info_socicam = " "
+    if str(constatacao_monit).lower() in ['nan', 'none', '']: constatacao_monit = " "
+    if str(analise_arpe).lower() in ['nan', 'none', '']: analise_arpe = " "
     
-    # Para mais de uma carta: "Carta N° A, Carta N° B e Carta N° C"
-    cartas_formatadas = [f"Carta SAP/PER/ARPE N° {c}" for c in cartas]
-    
-    partes = cartas_formatadas[:-1]
-    ultima = cartas_formatadas[-1]
-    
-    return f"constantes da {', '.join(partes)} e {ultima}, "
+    adicionar_paragrafo_info_compacta(doc, "Informação da SOCICAM: ", str(info_socicam))
+    adicionar_paragrafo_info_compacta(doc, "Constatação: ", str(constatacao_monit)) 
+    adicionar_paragrafo_info_compacta(doc, "Análise da ARPE: ", str(analise_arpe))
 
+def _safe_split(texto: Any) -> list:
+    content = str(texto).strip()
+    if not content or content.lower() == "nan": return []
+    return [item.strip() for item in content.split(";") if item.strip()]
 
 def gerar_secao_nao_conformidades_constatadas(
     doc, 
     row: dict, 
     nao_conformidades_df: pd.DataFrame, 
     FOTOS_DIR: str,
-    processo_info: Dict[str, str]
+    processo_info: Dict[str, str],
+    df_base_nc: pd.DataFrame,
+    ano_user: str,
+    proc_user: str,
+    monit_user: str
 ):
-    """
-    Gera a seção '3. RESULTADO DAS VISTORIAS DAS NÃO CONFORMIDADES PENDENTES'
-    com base nas informações da planilha.
-    """
     id_fiscalizacao = row["ID da Fiscalização"]
-    
-    # --- Extração de Dados Dinâmicos ---
     processo_ctr = processo_info.get("Processo CTR Nº", "XX/XXXX")
-    
-    # 1. Cartas SAP/PER/ARPE (pode conter múltiplos valores separados por ';')
     cartas_raw = str(processo_info.get("Carta SAP/PER/ARPE Nº", "")).strip()
-    
-    cartas_list = [c.strip() for c in cartas_raw.split(";") if c.strip() and c.lower() != "nan"]
-    
-    texto_cartas = _formatar_cartas_sap(cartas_list)
-    
+    texto_cartas = f"constante da Carta SAP/PER/ARPE N° {cartas_raw}, " if (cartas_raw and cartas_raw.lower() != 'nan') else ""
 
     nc_fiscalizacao = nao_conformidades_df[
         nao_conformidades_df["ID da Fiscalização"] == id_fiscalizacao
     ].copy()
 
     adicionar_titulo_secao(doc, "3. RESULTADO DAS VISTORIAS DAS NÃO CONFORMIDADES PENDENTES")
-
-    # MODIFICAÇÃO: Inserção do texto dinâmico com múltiplas cartas formatadas
     adicionar_paragrafo_justificado(
         doc,
         (
@@ -130,74 +70,53 @@ def gerar_secao_nao_conformidades_constatadas(
         ),
     )
 
-    if "Terminal" not in nc_fiscalizacao.columns:
-        adicionar_paragrafo_justificado(
-            doc,
-            "⚠️ Coluna 'Terminal' não encontrada na planilha de não conformidades."
-        )
-        return
-
-    id_arpe_col = "ID da não conformidade"
     num_terminal = 1
-
     for terminal, grupo_terminal in nc_fiscalizacao.groupby("Terminal"):
         par_terminal = doc.add_paragraph()
         run_terminal = par_terminal.add_run(f"3.{num_terminal} - {terminal.upper()}")
         aplicar_estilo_titulo(run_terminal)
-
         par_terminal.paragraph_format.space_before = Pt(12)
-        par_terminal.paragraph_format.space_after = Pt(6)
+
+        ncs_processadas = set()
 
         for _, nc_data in grupo_terminal.iterrows():
+            # Prioriza: Legenda -> Constatação
+            raw_key = str(nc_data.get("Legenda da Foto", "")).strip()
+            if not raw_key or raw_key.lower() == "nan":
+                raw_key = str(nc_data.get("Constatação", "")).strip()
+            
+            constatacoes_monit = _safe_split(raw_key)
+            
+            raw_info = str(nc_data.get("Informação SOCICAM", "")).strip()
+            infos_socicam = _safe_split(raw_info)
+            raw_analise = str(nc_data.get("Análise da Arpe", "")).strip()
+            analises_arpe = _safe_split(raw_analise)
 
-            nc_identificadores = _safe_split(nc_data, id_arpe_col, default="")
-            descricoes = _safe_split(nc_data, "Não Conformidade", default="")
-            info_socicam = _safe_split(nc_data, "Informação SOCICAM")
-            constatacao = _safe_split(nc_data, "Constatação")
-            analise_arpe = _safe_split(nc_data, "Análise da Arpe")
+            max_len = max(len(constatacoes_monit), len(infos_socicam), len(analises_arpe))
+            if len(constatacoes_monit) < max_len: constatacoes_monit.extend([""] * (max_len - len(constatacoes_monit)))
+            if len(infos_socicam) < max_len: infos_socicam.extend(["N/A"] * (max_len - len(infos_socicam)))
+            if len(analises_arpe) < max_len: analises_arpe.extend(["N/A"] * (max_len - len(analises_arpe)))
 
-            num_descricoes = len(descricoes)
-            num_ids = len(nc_identificadores)
-            log_id = f"Terminal: {terminal}"
+            for i in range(max_len):
+                texto_busca = constatacoes_monit[i]
+                if not texto_busca: continue
 
-            if num_ids != num_descricoes:
-                if 0 < num_ids < num_descricoes:
-                    nc_identificadores.extend([nc_identificadores[-1]] * (num_descricoes - num_ids))
-                    tqdm_write(f"⚠️ Quantidade de IDs menores que descrições ({log_id}). Confira sua planilha.")
-                elif num_ids > num_descricoes:
-                    nc_identificadores = nc_identificadores[:num_descricoes]
-                    tqdm_write(f"⚠️ Quantidade de IDs maiores que descrições ({log_id}). Confira sua planilha.")
-                elif num_ids == 0 and num_descricoes > 0:
-                    nc_identificadores = ["ID_FALTANDO"] * num_descricoes
-                    tqdm_write(f"⚠️ Quantidade de IDs ausentes ({log_id}). Usado 'ID_FALTANDO' como substituto.")
-
-            # Montagem da seção por item
-            for i, descricao in enumerate(descricoes):
-                # Usado para fins de depuração se a contagem de ';' falhar
-                alinhamento_fail = (
-                    "ALINHAMENTO FALHOU! Verifique o uso de ';' em todas as 4 colunas."
+                dados_base = encontrar_dados_na_base(
+                    texto_busca, 
+                    df_base_nc, 
+                    ano_user, 
+                    proc_user, 
+                    monit_user,
+                    terminal_user=str(terminal)
                 )
+                
+                if dados_base["id"] in ncs_processadas and dados_base["id"] != "ID_NAO_ENCONTRADO":
+                    continue
+                
+                if dados_base["id"] != "ID_NAO_ENCONTRADO":
+                    ncs_processadas.add(dados_base["id"])
 
-                # Busca as informações correspondentes ao índice 'i'
-                info = info_socicam[i] if i < len(info_socicam) else "Texto não disponível"
-                const = constatacao[i] if i < len(constatacao) else "Texto não disponível"
-                analise = analise_arpe[i] if i < len(analise_arpe) else "Texto não disponível"
-
-                # Lógica para verificar desalinhamento (como já estava)
-                max_len = max(
-                    len(descricoes),
-                    len(info_socicam),
-                    len(constatacao),
-                    len(analise_arpe)
-                )
-
-                if len(descricoes) != max_len:
-                    info = const = analise = alinhamento_fail
-
-                id_final = nc_identificadores[i]
-                _inserir_texto_nc(doc, id_final, descricao)
-                _inserir_linhas_info(doc, info, const, analise)
-
+                _inserir_texto_nc(doc, dados_base["id"], dados_base["descricao"])
+                _inserir_linhas_info(doc, infos_socicam[i], texto_busca, analises_arpe[i])
                 doc.add_paragraph()
-
         num_terminal += 1
