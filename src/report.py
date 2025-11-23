@@ -109,12 +109,27 @@ def gerar_relatorio() -> None:
         if os.path.isdir(CAMINHO_RAIZ_FOTOS): break
         else: print(f"❌ Pasta não encontrada: {CAMINHO_RAIZ_FOTOS}")
 
-    # --- FILTRO DE PENDENTES ---
-    if COLUNA_STATUS not in monitoramento_df.columns:
-        monitoramento_df[COLUNA_STATUS] = False
+    # --- FILTRO DE PENDENTES (Lógica robusta) ---
     
-    monitoramento_df[COLUNA_STATUS] = monitoramento_df[COLUNA_STATUS].astype(str).str.lower().isin(['true', '1', 'sim', 'verdadeiro', 'ok'])
-    pendentes = monitoramento_df[~monitoramento_df[COLUNA_STATUS]]
+    # 1. Se a coluna não existe, a inicializamos como string vazia (tipo 'object')
+    if COLUNA_STATUS not in monitoramento_df.columns:
+        monitoramento_df[COLUNA_STATUS] = ""
+    
+    # 2. Garante que a coluna é do tipo 'object' (string) para evitar o FutureWarning ao salvar "VERDADEIRO"
+    # Este passo é crucial para o salvamento final.
+    monitoramento_df[COLUNA_STATUS] = monitoramento_df[COLUNA_STATUS].astype(str)
+
+    # 3. Cria a MÁSCARA booleana (True para concluído, False para pendente)
+    mascara_concluido = (
+        monitoramento_df[COLUNA_STATUS]
+        .str.lower()
+        .str.strip()
+        .isin(['true', '1', 'sim', 'verdadeiro', 'ok'])
+    )
+
+    # 4. Filtra os pendentes (Onde a máscara NÃO é True)
+    pendentes = monitoramento_df[~mascara_concluido].copy()
+
 
     if pendentes.empty:
         print("\n✅ Todos os relatórios já foram gerados.")
@@ -186,7 +201,8 @@ def gerar_relatorio() -> None:
         sucesso = atualizar_toc_e_converter_para_pdf(caminho_docx, caminho_pdf)
         
         if os.path.exists(caminho_docx) and sucesso:
-            monitoramento_df.at[idx, COLUNA_STATUS] = True
+            # Salvamento da string "VERDADEIRO"
+            monitoramento_df.at[idx, COLUNA_STATUS] = "VERDADEIRO" 
 
     if not arquivo_em_uso(CAMINHO_PLANILHA):
         with pd.ExcelWriter(CAMINHO_PLANILHA, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:

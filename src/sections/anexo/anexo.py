@@ -16,11 +16,13 @@ from utils import (
 )
 
 def _safe_split_anexo(content: str) -> List[str]:
+    """Divide strings por ';'."""
     if not isinstance(content, str) or content.lower() == "nan" or not content.strip():
         return []
     return [d.strip() for d in content.split(";") if d.strip()]
 
 def _adaptar_lista_anexo(lista: List[str], tamanho_alvo: int, default_val: str) -> List[str]:
+    """Garante que a lista tenha o tamanho alvo, preenchendo ou cortando."""
     if len(lista) == tamanho_alvo: return lista
     if len(lista) > tamanho_alvo: return lista[:tamanho_alvo]
     nova = list(lista)
@@ -50,15 +52,22 @@ def _formatar_periodos(periodo_raw: Optional[str]) -> Optional[str]:
     return " e ".join(partes)
 
 def _buscar_arquivos_flexivel(id_excel: str, lista_arquivos: List[str]) -> List[str]:
+    """
+    Busca arquivos de forma inteligente e flexível.
+    """
     id_limpo = id_excel.strip().upper()
+    
+    # 1. Tentativa Exata
     matches = [f for f in lista_arquivos if f.upper().startswith(id_limpo)]
     if matches: return sorted(matches)
     
+    # 2. Tentativa sem sufixo de ponto
     if "." in id_limpo:
         id_base = id_limpo.rsplit(".", 1)[0]
         matches = [f for f in lista_arquivos if f.upper().startswith(id_base)]
         if matches: return sorted(matches)
 
+    # 3. Tentativa Normalizada
     id_norm = re.sub(r"[_\-\s\.]", "", id_limpo)
     matches_norm = []
     for f in lista_arquivos:
@@ -67,6 +76,12 @@ def _buscar_arquivos_flexivel(id_excel: str, lista_arquivos: List[str]) -> List[
         if f_norm.startswith(id_norm):
             matches_norm.append(f)
     if matches_norm: return sorted(matches_norm)
+
+    # 4. Tentativa por "CONTÉM"
+    if len(id_limpo) > 5:
+        matches_contains = [f for f in lista_arquivos if id_limpo in f.upper()]
+        if matches_contains: return sorted(matches_contains)
+
     return []
 
 def gerar_secao_anexo_fotos(
@@ -123,13 +138,17 @@ def gerar_secao_anexo_fotos(
 
     for terminal, grupo_terminal in nc_fisc.groupby("Terminal"):
         for _, linha in grupo_terminal.iterrows():
-            # PRIORIDADE: Legenda -> Constatação
+            # PRIORIDADE: Legenda -> Constatação -> Não Conformidade
             raw_key = str(linha.get("Legenda da Foto", "")).strip()
             if not raw_key or raw_key.lower() == "nan":
                  raw_key = str(linha.get("Constatação", "")).strip()
+                 if not raw_key or raw_key.lower() == "nan":
+                    raw_key = str(linha.get("Não Conformidade", "")).strip()
 
+            # 1. Divide por ponto e vírgula (NCs diferentes)
             textos_busca = _safe_split_anexo(raw_key)
             legendas_lista = _safe_split_anexo(linha.get("Legenda da Foto", ""))
+            
             max_len = len(textos_busca)
             legendas_lista = _adaptar_lista_anexo(legendas_lista, max_len, "")
 
@@ -138,6 +157,7 @@ def gerar_secao_anexo_fotos(
                 legenda_manual = legendas_lista[i]
                 if not texto: continue
 
+                # Busca ID na Base
                 dados_base = encontrar_dados_na_base(
                     texto, 
                     df_base_nc, 
@@ -153,6 +173,11 @@ def gerar_secao_anexo_fotos(
                 if id_encontrado in ["ID_NAO_ENCONTRADO", "ID_ERRO"]:
                     continue
 
+                # Busca fotos
+                fotos_do_item = _buscar_arquivos_flexivel(id_encontrado, arquivos_na_pasta)
+
+                if not fotos_do_item: continue
+
                 if terminal != terminal_anterior:
                     t_limpo = re.sub(r"(?i)^\s*terminal\s+de\s+", "", str(terminal))
                     t_limpo = re.sub(r"\s*\(.*?\)\s*$", "", t_limpo).strip()
@@ -160,17 +185,19 @@ def gerar_secao_anexo_fotos(
                     adicionar_titulo_secao(doc, f"TERMINAL DE {t_limpo.upper()}", nivel_heading=2)
                     terminal_anterior = terminal
 
-                # --- BUSCA FLEXÍVEL DE FOTOS ---
-                fotos_do_item = _buscar_arquivos_flexivel(id_encontrado, arquivos_na_pasta)
-
-                if not fotos_do_item: continue
-
-                # Usa a primeira linha da descrição como contexto
                 desc_curta = descricao_oficial.split('\n')[0]
                 _adicionar_contexto_nc(doc, id_encontrado, desc_curta)
 
-                sub_legendas = _safe_split_anexo(legenda_manual)
+                # --- MUDANÇA AQUI: QUEBRA POR DOIS PONTOS (:) ---
+                # Se a legenda manual tiver ':', quebra em lista. Senão, usa ela inteira.
+                if ":" in legenda_manual:
+                    sub_legendas = [x.strip() for x in legenda_manual.split(":")]
+                else:
+                    sub_legendas = [legenda_manual]
+                
+                # Adapta para o número de fotos encontradas
                 sub_legendas = _adaptar_lista_anexo(sub_legendas, len(fotos_do_item), "")
+                
                 fotos_em_pares = list(zip_longest(*[iter(fotos_do_item)] * 2, fillvalue=None))
 
                 count_legenda = 0
