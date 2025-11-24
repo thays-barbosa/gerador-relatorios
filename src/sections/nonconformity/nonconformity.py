@@ -1,4 +1,4 @@
-from docx.shared import Pt, RGBColor
+from docx.shared import Pt, RGBColor, Inches
 from docx.document import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from typing import Any, Dict, List
@@ -6,113 +6,183 @@ import pandas as pd
 import re
 
 # Presume-se que 'utils' contém as funções auxiliares necessárias
+# A função 'aplicar_estilo_corpo' é crucial para as correções.
 from utils import (
     adicionar_paragrafo_justificado,
     adicionar_titulo_secao,
     adicionar_paragrafo_info_compacta,
     aplicar_estilo_corpo,
     aplicar_estilo_titulo,
-    encontrar_dados_na_base
+    encontrar_dados_na_base,
+    adicionar_imagem,
+    processar_imagem_para_relatorio,
+    LARGURA_PADRAO_IN,
+    adicionar_duas_imagens_lado_a_lado 
 )
 
+# ============================================================
+#              CORREÇÃO PRINCIPAL IMPLEMENTADA
+# ============================================================
+
 def _limpar_prefixo_id(id_prefix: str, texto_bruto: str) -> str:
-    """Remove o ID da NC e seus delimitadores (-, :) do início da descrição para evitar duplicação."""
+    """
+    Remove o ID da NC apenas no início da frase, sem apagar textos válidos.
+    Elimina duplicações como:
+        TIP 2025_04 – 04 – ...
+        TIP 2025_06.1 – TIP 06.1 – ...
+    """
+
+    if not texto_bruto or str(texto_bruto).lower() == 'nan':
+        return "Descrição não disponível."
+
     desc_str = str(texto_bruto).strip()
-    id_prefix = id_prefix.strip()
+    id_prefix = str(id_prefix).strip()
 
-    # Regex que encontra o ID no início, seguido por 0 ou mais espaços,
-    # um separador opcional (traço ou dois pontos), e 0 ou mais espaços.
-    pattern = re.compile(re.escape(id_prefix) + r'\s*[-:]?\s*', re.IGNORECASE)
-    match = pattern.match(desc_str)
+    if not id_prefix:
+        return desc_str
 
-    if match:
-        # Remove a parte que corresponde ao ID e separador
-        desc_str = desc_str[match.end():].strip()
+    # extrai terminal (TIP)
+    terminal_sigla = id_prefix.split(" ")[0]  
 
-    # Garante que a primeira letra da descrição limpa esteja em maiúsculo
+    # extrai número base ex: 04, 06.1
+    match = re.search(r"(\d+(?:\.\d+)?)$", id_prefix.replace("_", "."))
+    base_num = match.group(1) if match else ""
+
+    # prefixos possíveis
+    candidatos = [
+        re.escape(id_prefix),                    
+        re.escape(id_prefix.replace("_", ".")),
+        re.escape(terminal_sigla + " " + base_num),
+        re.escape(base_num),
+        re.escape(terminal_sigla)
+    ]
+
+    candidatos = sorted(list(set(candidatos)), key=len, reverse=True)
+
+    # 🔥 CORREÇÃO AQUI
+    # Remove apenas o prefixo e UM delimitador (–, -, :)
+    pattern = re.compile(rf"^({('|'.join(candidatos))})\s*[-–:]?\s*", re.IGNORECASE)
+
+    desc_str = pattern.sub("", desc_str).strip()
+
+    # Corrige capitalização
     if desc_str and desc_str[0].islower():
         desc_str = desc_str[0].upper() + desc_str[1:]
-        
+
     return desc_str
 
 
+# ============================================================
+#               INSERÇÃO DE TEXTO DA NÃO CONFORMIDADE
+# ============================================================
+
 def _inserir_texto_nc(doc: Document, nc_titulo_identificador: str, descricao_bruta: str):
-    """Insere o título e a descrição de uma Não Conformidade (NC) no documento, limpando o ID da descrição."""
-    
-    # Remove o ID do início da descrição para evitar a duplicação visual
     descricao_limpa = _limpar_prefixo_id(nc_titulo_identificador, descricao_bruta)
 
+    linhas = [linha for linha in descricao_limpa.split("\n") if linha.strip()]
+    if not linhas:
+        return
+
     paragrafo_nc = doc.add_paragraph()
-    
-    # Título da NC (negrito e sublinhado)
+
+    # Título
     run_titulo = paragrafo_nc.add_run(f"Não Conformidade {nc_titulo_identificador}")
     aplicar_estilo_corpo(run_titulo, negrito=True)
     run_titulo.underline = True
-    
-    # Separador: Alterado de " - " para um único espaço " "
-    run_traco = paragrafo_nc.add_run(" ")
+
+    # Travessão único ✔️
+    run_traco = paragrafo_nc.add_run(" – ")
     aplicar_estilo_corpo(run_traco)
-    
-    # Descrição da NC (agora limpa)
-    run_desc = paragrafo_nc.add_run(descricao_limpa)
+
+    # Primeira linha
+    texto_principal = _limpar_prefixo_id(nc_titulo_identificador, linhas[0])
+    run_desc = paragrafo_nc.add_run(texto_principal)
     aplicar_estilo_corpo(run_desc)
-    
+
     paragrafo_nc.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
 
+    # Subitens
+    if len(linhas) > 1:
+        for sub_item_raw in linhas[1:]:
+            sub_item = _limpar_prefixo_id(nc_titulo_identificador, sub_item_raw)
+
+            p_sub = doc.add_paragraph()
+            p_sub.paragraph_format.left_indent = Inches(0.5)
+            p_sub.paragraph_format.space_after = Pt(2)
+            p_sub.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
+
+            partes = sub_item.split(" – ", 1)
+            sub_id = partes[0].strip()
+            sub_desc = partes[1].strip() if len(partes) > 1 else ""
+
+            base = nc_titulo_identificador.rsplit("_", 1)[0]
+            sub_id_completo = f"{base}_{sub_id}"
+
+            run_prefixo = p_sub.add_run(f"Não Conformidade {sub_id_completo}")
+            aplicar_estilo_corpo(run_prefixo, negrito=True)
+            run_prefixo.underline = True
+
+            run_sep = p_sub.add_run(" – ")
+            aplicar_estilo_corpo(run_sep)
+
+            run_desc = p_sub.add_run(sub_desc)
+            aplicar_estilo_corpo(run_desc)
+
+
+# ============================================================
+#                   INFO DA NC
+# ============================================================
+
 def _inserir_linhas_info(doc: Document, info_socicam: str, constatacao_monit: str, analise_arpe: str):
-    """Insere as três linhas de informação compacta (SOCICAM, Constatação, ARPE)."""
-    # Trata valores vazios/NaN/None para evitar erros e garantir texto legível
-    if str(info_socicam).strip().lower() in ['nan', 'none', '']: info_socicam = "N/A"
-    if str(constatacao_monit).strip().lower() in ['nan', 'none', '']: constatacao_monit = "N/A"
-    if str(analise_arpe).strip().lower() in ['nan', 'none', '']: analise_arpe = "N/A"
-    
-    # Adiciona as informações usando a função auxiliar
+    for var_name, value in [
+        ("info_socicam", info_socicam),
+        ("constatacao_monit", constatacao_monit),
+        ("analise_arpe", analise_arpe)
+    ]:
+        if str(value).strip().lower() in ["nan", "none", ""]:
+            locals()[var_name] = "N/A"
+
     adicionar_paragrafo_info_compacta(doc, "Informação da SOCICAM: ", str(info_socicam))
-    adicionar_paragrafo_info_compacta(doc, "Constatação: ", str(constatacao_monit)) 
+    adicionar_paragrafo_info_compacta(doc, "Constatação: ", str(constatacao_monit))
     adicionar_paragrafo_info_compacta(doc, "Análise da ARPE: ", str(analise_arpe))
 
+
+# ============================================================
+#                 SPLIT SEGURO DE STRINGS
+# ============================================================
+
 def _safe_split(texto: Any) -> List[str]:
-    """
-    Divide strings por ';' e agora também por ':' e filtra valores vazios ou 'nan'.
-    """
-    content = str(texto).strip()
-    if not content or content.lower() == "nan": return []
-    
-    # Substitui todos os ":" por ";", e então divide por ";" para tratar ambos os delimitadores
-    processed_content = content.replace(":", ";") 
-    
-    return [item.strip() for item in processed_content.split(";") if item.strip()]
+    s = str(texto).strip()
+    if not s or s.lower() == "nan":
+        return []
+    s = s.replace(":", ";")
+    return [x.strip() for x in s.split(";") if x.strip()]
+
+
+# ============================================================
+#         GERAÇÃO COMPLETA DA SEÇÃO 3 DO RELATÓRIO
+# ============================================================
 
 def gerar_secao_nao_conformidades_constatadas(
-    doc: Document, 
-    row: pd.Series, 
-    nao_conformidades_df: pd.DataFrame, 
-    FOTOS_DIR: str, 
+    doc: Document,
+    row: pd.Series,
+    nao_conformidades_df: pd.DataFrame,
+    FOTOS_DIR: str,
     processo_info: Dict[str, str],
     df_base_nc: pd.DataFrame,
     ano_user: str,
     proc_user: str,
     monit_user: str
 ):
-    """
-    Gera a seção 3 do relatório, detalhando os resultados das vistorias das NCs pendentes.
-    """
+
     id_fiscalizacao = row["ID da Fiscalização"]
     processo_ctr = processo_info.get("Processo CTR Nº", "XX/XXXX")
     cartas_raw = str(processo_info.get("Carta SAP/PER/ARPE Nº", "")).strip()
-    
-    # Gera o texto da carta, se disponível
-    texto_cartas = f"constante da Carta SAP/PER/ARPE N° {cartas_raw}, " if (cartas_raw and cartas_raw.lower() != 'nan') else ""
 
-    # Filtra as NCs para a fiscalização atual
-    nc_fiscalizacao = nao_conformidades_df[
-        nao_conformidades_df["ID da Fiscalização"] == id_fiscalizacao
-    ].copy()
+    texto_cartas = f"constante da Carta SAP/PER/ARPE N° {cartas_raw}, " if cartas_raw else ""
 
-    # Adiciona Título da Seção
     adicionar_titulo_secao(doc, "3. RESULTADO DAS VISTORIAS DAS NÃO CONFORMIDADES PENDENTES")
-    
-    # Adiciona Parágrafo Introdutório Justificado
+
     adicionar_paragrafo_justificado(
         doc,
         (
@@ -123,66 +193,56 @@ def gerar_secao_nao_conformidades_constatadas(
         ),
     )
 
+    grupo = nao_conformidades_df[
+        nao_conformidades_df["ID da Fiscalização"] == id_fiscalizacao
+    ].copy()
+
     num_terminal = 1
-    # Agrupa e itera por Terminal
-    for terminal, grupo_terminal in nc_fiscalizacao.groupby("Terminal"):
-        # Adiciona Título do Terminal (3.X - NOME DO TERMINAL)
-        par_terminal = doc.add_paragraph()
-        run_terminal = par_terminal.add_run(f"3.{num_terminal} - {terminal.upper()}")
-        aplicar_estilo_titulo(run_terminal) 
-        par_terminal.paragraph_format.space_before = Pt(12)
+    for terminal, dados_terminal in grupo.groupby("Terminal"):
+
+        p = doc.add_paragraph()
+        run = p.add_run(f"3.{num_terminal} - {terminal.upper()}")
+        aplicar_estilo_titulo(run)
+        p.paragraph_format.space_before = Pt(12)
 
         ncs_processadas = set()
 
-        # Itera sobre as linhas de NCs dentro do terminal
-        for _, nc_data in grupo_terminal.iterrows():
-            # 1. Extração da Chave de Busca (Constatação/Legenda da Foto)
-            # Prioriza: Legenda -> Constatação para a busca
-            raw_key = str(nc_data.get("Legenda da Foto", "")).strip()
+        for _, nc in dados_terminal.iterrows():
+
+            raw_key = str(nc.get("Legenda da Foto", "")).strip()
             if not raw_key or raw_key.lower() == "nan":
-                raw_key = str(nc_data.get("Constatação", "")).strip()
-            
-            # 2. Divide os campos por ';', permitindo múltiplos itens por linha (agora aceita ':' e ';')
-            constatacoes_monit = _safe_split(raw_key)
-            infos_socicam = _safe_split(nc_data.get("Informação SOCICAM", ""))
-            analises_arpe = _safe_split(nc_data.get("Análise da Arpe", ""))
+                raw_key = str(nc.get("Constatação", "")).strip()
 
-            # 3. Adapta listas para o tamanho máximo (preenchendo com vazios ou "N/A" se necessário)
-            max_len = max(len(constatacoes_monit), len(infos_socicam), len(analises_arpe))
-            
-            if len(constatacoes_monit) < max_len: 
-                constatacoes_monit.extend([""] * (max_len - len(constatacoes_monit)))
-            
-            if len(infos_socicam) < max_len: 
-                infos_socicam.extend(["N/A"] * (max_len - len(infos_socicam)))
-            if len(analises_arpe) < max_len: 
-                analises_arpe.extend(["N/A"] * (max_len - len(analises_arpe)))
+            constatacoes = _safe_split(raw_key)
+            infos = _safe_split(nc.get("Informação SOCICAM", ""))
+            analises = _safe_split(nc.get("Análise da Arpe", ""))
 
-            # Itera sobre cada item individual (se houver split por ';')
+            max_len = max(len(constatacoes), len(infos), len(analises))
+            constatacoes += [""] * (max_len - len(constatacoes))
+            infos += ["N/A"] * (max_len - len(infos))
+            analises += ["N/A"] * (max_len - len(analises))
+
             for i in range(max_len):
-                texto_busca = constatacoes_monit[i]
-                if not texto_busca: continue 
+                const = constatacoes[i]
+                if not const:
+                    continue
 
-                # 4. Busca o ID oficial e a descrição na base
-                dados_base = encontrar_dados_na_base(
-                    texto_busca, 
-                    df_base_nc, 
-                    ano_user, 
-                    proc_user, 
+                dados = encontrar_dados_na_base(
+                    const,
+                    df_base_nc,
+                    ano_user,
+                    proc_user,
                     monit_user,
                     terminal_user=str(terminal)
                 )
-                
-                # 5. Evita processar a mesma NC duas vezes 
-                if dados_base["id"] != "ID_NAO_ENCONTRADO":
-                    if dados_base["id"] in ncs_processadas:
-                        continue 
-                    ncs_processadas.add(dados_base["id"]) 
 
-                # 6. Insere os dados no documento
-                _inserir_texto_nc(doc, dados_base["id"], dados_base["descricao"])
-                _inserir_linhas_info(doc, infos_socicam[i], texto_busca, analises_arpe[i])
-                
-                doc.add_paragraph() 
-                
+                if dados["id"] != "ID_NAO_ENCONTRADO":
+                    if dados["id"] in ncs_processadas:
+                        continue
+                    ncs_processadas.add(dados["id"])
+
+                _inserir_texto_nc(doc, dados["id"], dados["descricao"])
+                _inserir_linhas_info(doc, infos[i], const, analises[i])
+                doc.add_paragraph().paragraph_format.space_after = Pt(12)
+
         num_terminal += 1

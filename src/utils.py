@@ -1,4 +1,4 @@
-from typing import Tuple, Optional, Dict
+from typing import Tuple, Optional, Dict, Any, List
 import io
 import os
 from datetime import datetime
@@ -22,6 +22,8 @@ ALTURA_IMAGEM_LADO_A_LADO = Inches(2.7)
 _COR_CINZA_SOMBRA_HEX = "BFBFBF"
 _COR_PRETO_RGB = (0, 0, 0)
 
+# --- FUNÇÕES DE CARREGAMENTO E LIMPEZA DE DADOS ---
+
 def carregar_base_nc(caminho_base: str) -> pd.DataFrame:
     try:
         # Lê como string para manter formatação de IDs (ex: 02.1)
@@ -29,7 +31,7 @@ def carregar_base_nc(caminho_base: str) -> pd.DataFrame:
         df.columns = df.columns.str.strip()
         df = df.dropna(how='all')
         
-        cols_texto = ["TIPO_DOC", "PROCESSO", "Evidencia_Agregada", "Evidencia_Desagregada", "Localização/VIA", "Item", "Status-ARPE"]
+        cols_texto = ["TIPO_DOC", "PROCESSO", "Evidencia_Agregada", "Evidencia_Desagregada", "Localização/VIA", "Item", "Status-ARPE", "Terminal"]
         for col in cols_texto:
             if col in df.columns:
                 df[col] = df[col].astype(str).str.strip()
@@ -42,6 +44,7 @@ def carregar_base_nc(caminho_base: str) -> pd.DataFrame:
 
 def _remover_acentos(texto: str) -> str:
     try:
+        # Normaliza e remove caracteres combinantes (acentos, cedilha, etc.)
         return "".join([c for c in unicodedata.normalize('NFKD', str(texto)) if not unicodedata.combining(c)])
     except: return str(texto)
 
@@ -52,8 +55,32 @@ def _limpar_texto_para_match(texto: str) -> str:
     t = re.sub(r"\(?\s*vide\s+fotos?.*?\)?", " ", t)
     t = re.sub(r"\(?\s*fotos?\s+\d+.*?\)?", " ", t)
     t = re.sub(r"conforme\s+evidenciado.*", " ", t)
+    # Remove qualquer ID numérico com ou sem prefixo de terminal/ano que possa estar na frente
+    t = re.sub(r"(\s|^)([a-z]{3}\s)?(\d{2,4}\_)?(\d+(\.\d+)?)\s*[-:]?\s*", " ", t) 
     t = re.sub(r"[^\w\s]", " ", t)
     return " ".join(t.split())
+
+def _limpar_terminal_para_busca(terminal_nome: str) -> str:
+    # Retorna o nome do terminal em maiúsculas com espaços substituídos por underscore
+    return str(terminal_nome).upper().replace(" ", "_")
+
+# --- FUNÇÃO PRINCIPAL DE BUSCA ---
+
+def _ajustar_numero_nc(ano: str, processo: str, monit: str, item: str, prefixo_terminal: str) -> str:
+    """
+    Gera o ID completo da NC no novo padrão (Ex: TIP 2025_02, TIP 2025_02.1).
+    """
+    if not item:
+        return "ID_NAO_ENCONTRADO"
+        
+    item_limpo = str(item).strip().replace('.', '_', 1).replace('.', '').replace('_', '.', 1).strip()
+    
+    # Remove o prefixo do terminal ou ano se já estiverem no item (para evitar TIP TIP...)
+    item_sem_prefixo = re.sub(r'([A-Z]{3}\s)?(\d{4}_)?', '', item_limpo).strip()
+
+    # Formato final: PREFIXO ANO_ITEM (Ex: TIP 2025_02.1)
+    return f"{prefixo_terminal} {ano}_{item_sem_prefixo}"
+
 
 def encontrar_dados_na_base(
     texto_busca: str,
@@ -78,29 +105,37 @@ def encontrar_dados_na_base(
     # --- 1. FILTROS ---
     df_filt = df_base.copy()
 
-    if "Ano" in df_filt.columns and ano_user:
-        try:
-            df_filt = df_filt[pd.to_numeric(df_filt["Ano"], errors='coerce') == int(ano_user)]
-        except: pass
+    # Filtro Ano
+    if "Ano" in df_filt.columns and ano_user and str(ano_user).isdigit():
+        df_filt = df_filt[df_filt["Ano"].astype(str).str.strip() == str(ano_user)]
 
+    # Filtro Processo
     if "PROCESSO" in df_filt.columns and proc_user:
         p_clean = proc_user.replace("CTR", "").strip()
         df_filt = df_filt[df_filt["PROCESSO"].str.upper().str.contains(p_clean, na=False)]
 
+    # Filtro Tipo_Doc (Monit)
     if "TIPO_DOC" in df_filt.columns and monit_user:
         mask_monit = df_filt["TIPO_DOC"].str.upper().str.contains("MONIT", na=False)
         mask_num = df_filt["TIPO_DOC"].str.contains(str(monit_user), na=False)
         df_filt = df_filt[mask_monit & mask_num]
 
+    prefixo_terminal = ""
     if terminal_user and "Localização/VIA" in df_filt.columns:
-        t_clean = str(terminal_user).upper()
-        t_clean = re.sub(r"TERMINAL\s+(RODOVIÁRIO\s+)?(DE|DO|DA)\s+", "", t_clean)
-        t_clean = t_clean.split("(")[0].strip()
-        
-        if "RECIFE" in t_clean or "TIP" in t_clean:
-             df_filt = df_filt[df_filt["Localização/VIA"].str.upper().str.contains("RECIFE|TIP", regex=True, na=False)]
+        t_limpo_busca = _limpar_terminal_para_busca(terminal_user).replace("_", " ")
+
+        # Tenta inferir a sigla para o ID formatado
+        match_sigla = re.search(r"\((.*?)\)", terminal_user.upper())
+        if match_sigla:
+            prefixo_terminal = match_sigla.group(1)
+        elif "RECIFE" in t_limpo_busca or "TIP" in t_limpo_busca:
+            prefixo_terminal = "TIP"
         else:
-             df_filt = df_filt[df_filt["Localização/VIA"].str.upper().str.contains(t_clean, na=False)]
+            # Pega as 3 primeiras letras da primeira palavra (se houver)
+            prefixo_terminal = t_limpo_busca.split(" ")[0][:3]
+        
+        # Filtra pelo nome do terminal (ou sigla)
+        df_filt = df_filt[df_filt["Localização/VIA"].str.upper().str.contains(t_limpo_busca.split(" ")[0], na=False)]
 
     if df_filt.empty: return resultado
 
@@ -114,13 +149,11 @@ def encontrar_dados_na_base(
         txt_base_raw = " ".join([str(row.get(c, "")) for c in cols_busca])
         txt_base_limpo = _limpar_texto_para_match(txt_base_raw)
         
-        # Legenda contida na Base (Ex: "Infiltração" contido em "Infiltração grave no teto")
-        if texto_limpo in txt_base_limpo and len(texto_limpo) > 4:
+        # Lógica Fuzzy
+        if len(texto_limpo) > 5 and texto_limpo in txt_base_limpo:
             ratio = 1.0
-        # Base contida na Legenda
-        elif txt_base_limpo in texto_limpo and len(txt_base_limpo) > 4:
-            ratio = 1.0
-        # Fuzzy
+        elif len(txt_base_limpo) > 5 and txt_base_limpo in texto_limpo:
+            ratio = 0.99 
         else:
             ratio = SequenceMatcher(None, texto_limpo, txt_base_limpo).ratio()
             
@@ -128,59 +161,56 @@ def encontrar_dados_na_base(
             melhor_ratio = ratio
             melhor_row = row
 
-    # --- 3. AGRUPAMENTO DE ITENS ---
-    if melhor_row is not None and melhor_ratio > 0.20:
+    # --- 3. AGRUPAMENTO DE ITENS E FORMATAÇÃO ---
+    if melhor_row is not None and melhor_ratio > 0.70:
         
-        # Pega o agrupador (Evidencia_Agregada)
         evidencia_chave = str(melhor_row.get("Evidencia_Agregada", "")).strip()
         
-        if not evidencia_chave or evidencia_chave.lower() == 'nan':
-            df_grupo = pd.DataFrame([melhor_row])
-        else:
-            # Pega todos os itens com a mesma Evidencia Agregada neste contexto
-            df_grupo = df_filt[df_filt["Evidencia_Agregada"] == evidencia_chave].sort_values(by="Item")
+        # Define o ID Base (ex: "02")
+        item_raw = str(melhor_row.get("Item", "")).strip()
+        base_id = item_raw.split(".")[0] if "." in item_raw else item_raw
 
-        # Define o ID Principal (ex: "02.1" vira "02")
-        primeiro_item = str(df_grupo.iloc[0]["Item"])
-        if "." in primeiro_item and primeiro_item.replace(".","").isdigit():
-            id_final = primeiro_item.split(".")[0]
-        else:
-            id_final = primeiro_item
+        # Formata o ID Principal: "TIP 2025_02"
+        id_final_formatado = _ajustar_numero_nc(ano_user, proc_user, monit_user, base_id, prefixo_terminal)
 
-        # Monta o texto com lista
+        # Caso com sub-itens (Agrupamento)
+        df_grupo = df_filt[df_filt["Item"].astype(str).str.strip().str.startswith(base_id)].sort_values(by="Item")
+
         linhas_texto = []
         
-        # Título
+        # 1. Adiciona o texto principal (Evidencia Agregada) - Limpo de prefixos
         if evidencia_chave and evidencia_chave.lower() != 'nan':
-            linhas_texto.append(evidencia_chave)
+             linhas_texto.append(evidencia_chave)
         
-        # Itens da lista
+        # 2. Adiciona os itens desagregados formatados (CORREÇÃO CRUCIAL AQUI)
         for _, row_g in df_grupo.iterrows():
-            item_n = str(row_g.get("Item", "")).strip()
+            item_n = str(row_g.get("Item", "")).strip() # ex: 02.1
             desag = str(row_g.get("Evidencia_Desagregada", "")).strip()
             
+            # Sub-item deve ser adicionado se for válido E diferente da evidência agregada
             if desag and desag.lower() != 'nan' and desag != evidencia_chave:
-                # Formato: "02.1 - Descrição"
-                linhas_texto.append(f"{item_n} - {desag}")
+                # ✅ Formato de retorno CORRETO: "02.1 – Espelho oxidado" 
+                # Sem o prefixo do terminal (TIP) na frente.
+                linhas_texto.append(f"{item_n} – {desag}")
         
         if not linhas_texto:
             desc_final = texto_busca
         else:
+            # Garante que a primeira linha (Evidencia Agregada) seja única
+            linhas_texto = list(dict.fromkeys(linhas_texto))
             desc_final = "\n".join(linhas_texto)
 
         resultado = {
-            "id": id_final,
+            "id": id_final_formatado, 
             "descricao": desc_final,
             "situacao": str(melhor_row.get("Status-ARPE", "N/A")).strip(),
             "data_vistoria": formatar_data_df(melhor_row.get("DATA FISC", ""))
         }
-        print(f"   ✅ Match ({melhor_ratio:.2f}) -> {id_final}")
-    else:
-        pass
-
+        print(f"  ✅ Match ({melhor_ratio:.2f}) -> {id_final_formatado}")
+    
     return resultado
 
-# --- FUNÇÕES VISUAIS (Corrigidas: Variável 'par') ---
+# --- FUNÇÕES VISUAIS ---
 
 def _set_run_language(run, lang_code: str = "pt-BR") -> None:
     rPr = run._element.get_or_add_rPr()
@@ -221,14 +251,14 @@ def aplicar_estilo_titulo(run, cor_rgb: Tuple[int, int, int] = _COR_PRETO_RGB) -
     aplicar_estilo_texto(run, tamanho=12, negrito=True, fonte="Arial", cor_rgb=cor_rgb)
 
 def adicionar_paragrafo_justificado(doc: Document, texto: str, negrito: bool = False):
-    par = doc.add_paragraph() # Definido como 'par'
+    par = doc.add_paragraph() 
     par.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
     run = par.add_run(texto)
     aplicar_estilo_corpo(run, negrito=negrito)
-    return par # Retorna 'par'
+    return par 
 
 def adicionar_texto_centralizado(doc: Document, texto: str, tamanho_fonte: int = 12, negrito: bool = True):
-    par = doc.add_paragraph() # Definido como 'par'
+    par = doc.add_paragraph() 
     par.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = par.add_run(texto)
     if tamanho_fonte == 12 and negrito:
@@ -238,7 +268,7 @@ def adicionar_texto_centralizado(doc: Document, texto: str, tamanho_fonte: int =
     else:
         aplicar_estilo_texto(run, tamanho_fonte, negrito, fonte="Arial")
     desabilitar_correcao_paragrafo(par)
-    return par # Retorna 'par'
+    return par 
 
 def adicionar_paragrafo_info_compacta(doc: Document, titulo: str, conteudo: str):
     par = doc.add_paragraph()
@@ -462,24 +492,30 @@ def adicionar_duas_imagens_lado_a_lado(doc: Document, fotos_dir: str, nome_foto1
         else: p.add_run(f"🚫 {nome_foto1}")
         adicionar_legenda_formatada_na_celula(c_leg, legenda1)
     else:
+        # Lógica para DUAS imagens lado a lado
+        largura_celula_img = LARGURA_IMAGEM_LADO_A_LADO
+        largura_foto_interna = Inches(3.0) 
+        
         for r in range(2):
             for c in range(2):
-                tabela.cell(r, c).width = LARGURA_IMAGEM_LADO_A_LADO
+                tabela.cell(r, c).width = largura_celula_img
+                
+        # Imagem 1
         p1 = tabela.cell(0, 0).paragraphs[0]
         p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
         b1 = processar_imagem_para_relatorio(os.path.join(fotos_dir, nome_foto1))
-        if b1: p1.add_run().add_picture(b1, width=Inches(3.0), height=ALTURA_IMAGEM_LADO_A_LADO)
+        if b1: p1.add_run().add_picture(b1, width=largura_foto_interna, height=ALTURA_IMAGEM_LADO_A_LADO)
         else: p1.add_run(f"🚫 {nome_foto1}")
         
+        # Imagem 2
         p2 = tabela.cell(0, 1).paragraphs[0]
         p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
         b2 = processar_imagem_para_relatorio(os.path.join(fotos_dir, nome_foto2))
-        if b2: p2.add_run().add_picture(b2, width=Inches(3.0), height=ALTURA_IMAGEM_LADO_A_LADO)
+        if b2: p2.add_run().add_picture(b2, width=largura_foto_interna, height=ALTURA_IMAGEM_LADO_A_LADO)
         else: p2.add_run(f"🚫 {nome_foto2}")
 
+        # Legendas
         adicionar_legenda_formatada_na_celula(tabela.cell(1, 0), legenda1)
         adicionar_legenda_formatada_na_celula(tabela.cell(1, 1), legenda2 or "")
+        
     doc.add_paragraph().paragraph_format.space_after = Pt(12)
-
-def _limpar_terminal_para_busca(terminal_nome: str) -> str:
-    return str(terminal_nome).upper().replace(" ", "_")
