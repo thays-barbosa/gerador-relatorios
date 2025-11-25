@@ -29,25 +29,17 @@ def _aplicar_estilo_resumo(run, negrito: bool = False):
 def _formatar_nome_terminal(nome_bruto: str) -> str:
     return str(nome_bruto).upper().replace("TERMINAL DE ", "").replace("TERMINAL DO ", "").strip()
 
-def _safe_split_resumo(texto: Any) -> List[str]:
-    """
-    Divide por ';' ou Enter ou ':' (protegendo horários como 10:30).
-    """
+def _safe_split_resumo_blocos(texto: Any) -> List[str]:
     s = str(texto).strip()
     if not s or s.lower() == 'nan': return []
-
-    partes = re.split(r'[;\n]|:(?!\d)', s)
-    
+    partes = re.split(r'[;\n]', s)
     return [x.strip() for x in partes if x.strip()]
 
 def _limpar_redundancia_tabela(texto: str) -> str:
-    """Remove 'TIP 01', 'CAR 05' etc. do início."""
     if not texto: return ""
     padrao = r'^([A-Z]{3}\s+)?\d+([._]\d+)?\s*[-:–]?\s*'
     limpo = re.sub(padrao, '', str(texto).strip())
-    
     if not limpo and texto: return str(texto)
-
     if limpo and limpo[0].islower():
         return limpo[0].upper() + limpo[1:]
     return limpo
@@ -113,25 +105,30 @@ def gerar_secao_resumo_nao_conformidades(
             if not raw_const or raw_const.lower() == "nan":
                  raw_const = str(linha.get("Constatação", "")).strip()
 
-            constatacoes = _safe_split_resumo(raw_const)
+            constatacoes_blocos = _safe_split_resumo_blocos(raw_const)
             
             raw_info = str(linha.get("Informação SOCICAM carta", "")).strip()
             if not raw_info or raw_info.lower() == 'nan':
                 raw_info = str(linha.get("Informação SOCICAM", "")).strip()
             
-            infos = _safe_split_resumo(raw_info)
+            infos = _safe_split_resumo_blocos(raw_info)
             
-            max_len = max(len(constatacoes), len(infos))
-            if len(constatacoes) < max_len: constatacoes.extend([""] * (max_len - len(constatacoes)))
+            max_len = max(len(constatacoes_blocos), len(infos))
+            if len(constatacoes_blocos) < max_len: constatacoes_blocos.extend([""] * (max_len - len(constatacoes_blocos)))
             if len(infos) < max_len: infos.extend(["N/A"] * (max_len - len(infos)))
 
             for i in range(max_len):
-                txt_busca = constatacoes[i]
-                if not txt_busca: continue
+                bloco_texto = constatacoes_blocos[i]
+                if not bloco_texto: continue
+                
+                # --- CORREÇÃO: Limpeza de data para busca no Resumo ---
+                texto_pre_limpo = bloco_texto.split(':')[0].strip()
+                texto_para_busca = re.sub(r'\b(?:em\s+)?\d{2}/\d{2}/\d{4}\b', '', texto_pre_limpo, flags=re.IGNORECASE).strip()
+                texto_para_busca = re.sub(r'\s+', ' ', texto_para_busca).strip()
                 
                 info_socicam_texto = infos[i]
                 dados_base = encontrar_dados_na_base(
-                    txt_busca, df_base_nc, ano_user, proc_user, monit_user, terminal_user=str(terminal_bruto)
+                    texto_para_busca, df_base_nc, ano_user, proc_user, monit_user, terminal_user=str(terminal_bruto)
                 )
                 
                 if dados_base["id"] in ids_adicionados and dados_base["id"] != "ID_NAO_ENCONTRADO":
@@ -166,11 +163,12 @@ def gerar_secao_resumo_nao_conformidades(
             p_nc = row_cells[1].paragraphs[0]
             aplicar_estilo_paragrafo_compacto(p_nc)
             
+            # Formatação do ID no Resumo (com traço se preferir ou sem, aqui mantive só o ID e Descrição)
             r_id = p_nc.add_run(f"{item['id']}")
             _aplicar_estilo_resumo(r_id, negrito=True)
          
             desc_limpa = _limpar_redundancia_tabela(item['desc'])
-            
+            # Aqui já tem o traço no resumo
             r_desc = p_nc.add_run(f" – {desc_limpa}") 
             _aplicar_estilo_resumo(r_desc)
             

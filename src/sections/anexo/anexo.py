@@ -149,8 +149,12 @@ def gerar_secao_anexo_fotos(
     terminal_anterior = None
 
     for terminal, grupo_terminal in nc_fisc.groupby("Terminal"):
+        
+        # --- CORREÇÃO: Conjunto para evitar IDs duplicados no mesmo terminal ---
+        ids_processados_no_terminal = set() 
+
         for _, linha in grupo_terminal.iterrows():
-           
+            
             raw_key = str(linha.get("Legenda da Foto", "")).strip()
             if not raw_key or raw_key.lower() == "nan":
                  raw_key = str(linha.get("Constatação", "")).strip()
@@ -172,9 +176,13 @@ def gerar_secao_anexo_fotos(
                 
                 if not texto_id: continue
 
+                # --- LIMPEZA DE BUSCA (IGUAL AO NONCONFORMITY.PY) ---
+                # Pega só o texto antes dos dois pontos para buscar o ID correto
+                texto_para_busca = texto_id.split(':')[0].strip()
+
                 # Busca ID na Base
                 dados_base = encontrar_dados_na_base(
-                    texto_id, 
+                    texto_para_busca, 
                     df_base_nc, 
                     ano_user, 
                     proc_user, 
@@ -187,6 +195,13 @@ def gerar_secao_anexo_fotos(
 
                 if id_encontrado in ["ID_NAO_ENCONTRADO", "ID_ERRO"]:
                     continue
+
+                # --- CORREÇÃO: Verifica se já processamos esse ID neste terminal ---
+                if id_encontrado in ids_processados_no_terminal:
+                    continue
+                
+                # Se não processou, adiciona na lista para não repetir
+                ids_processados_no_terminal.add(id_encontrado)
 
                 # Busca fotos
                 fotos_do_item = _buscar_arquivos_flexivel(id_encontrado, arquivos_na_pasta)
@@ -211,9 +226,8 @@ def gerar_secao_anexo_fotos(
                 if ":" in bloco_legenda:
                     sub_legendas = [x.strip() for x in bloco_legenda.split(":")]
                 else:
-
                     sub_legendas = [bloco_legenda] * len(fotos_do_item)
- 
+
                 sub_legendas = _adaptar_lista_anexo(sub_legendas, len(fotos_do_item), "")
                 
                 fotos_em_pares = list(zip_longest(*[iter(fotos_do_item)] * 2, fillvalue=None))

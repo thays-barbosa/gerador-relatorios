@@ -22,9 +22,19 @@ ALTURA_IMAGEM_LADO_A_LADO = Inches(2.7)
 _COR_CINZA_SOMBRA_HEX = "BFBFBF"
 _COR_PRETO_RGB = (0, 0, 0)
 
+# --- STOPWORDS (Palavras ignoradas na busca) ---
+STOPWORDS = {
+    "o", "a", "os", "as", "um", "uns", "uma", "umas",
+    "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas",
+    "por", "para", "com", "sem", "que", "se", "e", "ou", "ao", "aos",
+    "terminal", "rodoviario", "intermunicipal", "passageiros", "lugar", "local",
+    "item", "nc", "nao", "conformidade", "ver", "foto", "fotos", "vide", "imagem",
+    # Ignora nomes de cidade na comparação de TEXTO (o filtro de terminal já cuida disso)
+    "recife", "tip", "caruaru", "garanhuns", "arcoverde", "petrolina", "serra", "talhada"
+}
+
 def carregar_base_nc(caminho_base: str) -> pd.DataFrame:
     try:
-       
         df = pd.read_excel(caminho_base, sheet_name="BASE", dtype=str)
         df.columns = df.columns.str.strip()
         df = df.dropna(how='all')
@@ -42,46 +52,64 @@ def carregar_base_nc(caminho_base: str) -> pd.DataFrame:
 
 def _remover_acentos(texto: str) -> str:
     try:
-       
         return "".join([c for c in unicodedata.normalize('NFKD', str(texto)) if not unicodedata.combining(c)])
     except: return str(texto)
 
-def _limpar_texto_para_match(texto: str) -> str:
+def _singularizar(palavra: str) -> str:
+    """
+    Remove apenas o 's' final para lidar com plurais simples.
+    Não remove vogais para evitar confundir palavras (ex: Muro x Mura).
+    """
+    p = palavra.lower()
+    if p.endswith('s') and len(p) > 3: 
+        return p[:-1]
+    return p
+
+def _extrair_palavras_chave(texto: str) -> set:
+    """
+    Limpa o texto e extrai tokens (palavras) relevantes singularizados.
+    """
     t = _remover_acentos(str(texto)).lower().strip()
-    # Remove termos de referência a fotos que atrapalham o match
-    t = re.sub(r"\(?\s*ver\s+fotos?.*?\)?", " ", t)
-    t = re.sub(r"\(?\s*vide\s+fotos?.*?\)?", " ", t)
-    t = re.sub(r"\(?\s*fotos?\s+\d+.*?\)?", " ", t)
-    t = re.sub(r"conforme\s+evidenciado.*", " ", t)
-    # Remove qualquer ID numérico com ou sem prefixo de terminal/ano que possa estar na frente
-    t = re.sub(r"(\s|^)([a-z]{3}\s)?(\d{2,4}\_)?(\d+(\.\d+)?)\s*[-:]?\s*", " ", t) 
+    
+    # Remove datas
+    t = re.sub(r'\b\d{2}/\d{2}/\d{4}\b', ' ', t)
+    
+    # Remove IDs (TIP 01, 2025_01)
+    t = re.sub(r"(\s|^)([a-z]{3}\s)?(\d{2,4}\_)?(\d+(\.\d+)?)\s*[-:]?\s*", " ", t)
+    
+    # Remove pontuação
+    t = re.sub(r"[^\w\s]", " ", t)
+    
+    palavras = t.split()
+    
+    tokens = set()
+    for p in palavras:
+        if len(p) > 2 and p not in STOPWORDS:
+            tokens.add(_singularizar(p))
+            
+    return tokens
+
+def _limpar_texto_simples(texto: str) -> str:
+    t = _remover_acentos(str(texto)).lower().strip()
+    t = re.sub(r'\b\d{2}/\d{2}/\d{4}\b', ' ', t)
     t = re.sub(r"[^\w\s]", " ", t)
     return " ".join(t.split())
 
 def _limpar_terminal_para_busca(terminal_nome: str) -> str:
-    
     return str(terminal_nome).upper().replace(" ", "_")
 
 def _limpar_processo_para_match(processo: str) -> str:
-    """Padroniza o texto do processo (ex: 'CTR 01/2025' -> '01/2025')."""
     t = str(processo).upper().strip()
     t = re.sub(r'(CTR\s*Nº?|Nº?|:)\s*', ' ', t) 
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
 def _ajustar_numero_nc(ano: str, processo: str, monit: str, item: str, prefixo_terminal: str) -> str:
-    """
-    Gera o ID completo da NC no novo padrão (Ex: TIP 2025_02, TIP 2025_02.1).
-    """
     if not item:
         return "ID_NAO_ENCONTRADO"
-        
     item_limpo = str(item).strip().replace('.', '_', 1).replace('.', '').replace('_', '.', 1).strip()
-    
     item_sem_prefixo = re.sub(r'([A-Z]{3}\s)?(\d{4}_)?', '', item_limpo).strip()
-
     return f"{prefixo_terminal} {ano}_{item_sem_prefixo}"
-
 
 def encontrar_dados_na_base(
     texto_busca: str,
@@ -92,7 +120,11 @@ def encontrar_dados_na_base(
     terminal_user: str = None
 ) -> Dict[str, str]:
     
-    texto_limpo = _limpar_texto_para_match(texto_busca)
+    # 1. Tokens para Match de Palavras-Chave
+    tokens_busca = _extrair_palavras_chave(texto_busca)
+    
+    # 2. Texto simples para Match de Sequência
+    texto_busca_seq = _limpar_texto_simples(texto_busca)
 
     resultado = {
         "id": "ID_NAO_ENCONTRADO",
@@ -101,24 +133,18 @@ def encontrar_dados_na_base(
         "data_vistoria": ""
     }
 
-    if df_base.empty or not texto_limpo: return resultado
+    if df_base.empty or not texto_busca.strip(): return resultado
 
     df_filt = df_base.copy()
 
+    # --- FILTROS (Ano, Processo, Doc) ---
     if "Ano" in df_filt.columns and ano_user and str(ano_user).isdigit():
         df_filt = df_filt[df_filt["Ano"].astype(str).str.strip() == str(ano_user)]
 
     if "PROCESSO" in df_filt.columns and proc_user:
-        # Aplica limpeza para padronizar o input do usuário e o dado da base
         p_clean_user = _limpar_processo_para_match(proc_user)
-        
-        # Cria uma coluna temporária limpa no DataFrame para fazer o filtro
         df_filt['PROCESSO_LIMPO'] = df_filt["PROCESSO"].apply(_limpar_processo_para_match)
-        
-        # Filtra onde a versão limpa do processo da base contém o valor limpo do usuário
         df_filt = df_filt[df_filt["PROCESSO_LIMPO"].str.contains(p_clean_user, na=False)]
-        
-        # Remove a coluna temporária após o filtro
         df_filt = df_filt.drop(columns=['PROCESSO_LIMPO'])
 
     if "TIPO_DOC" in df_filt.columns and monit_user:
@@ -126,48 +152,86 @@ def encontrar_dados_na_base(
         mask_num = df_filt["TIPO_DOC"].str.contains(str(monit_user), na=False)
         df_filt = df_filt[mask_monit & mask_num]
 
+    # --- FILTRO DE TERMINAL (ROBUSTO) ---
     prefixo_terminal = ""
     if terminal_user and "Localização/VIA" in df_filt.columns:
-        t_limpo_busca = _limpar_terminal_para_busca(terminal_user).replace("_", " ")
-
-        match_sigla = re.search(r"\((.*?)\)", terminal_user.upper())
-        if match_sigla:
-            prefixo_terminal = match_sigla.group(1)
-        elif "RECIFE" in t_limpo_busca or "TIP" in t_limpo_busca:
-            prefixo_terminal = "TIP"
-        else:
-  
-            prefixo_terminal = t_limpo_busca.split(" ")[0][:3]
+        t_user_upper = str(terminal_user).upper()
+        sigla = ""
         
-        df_filt = df_filt[df_filt["Localização/VIA"].str.upper().str.contains(t_limpo_busca.split(" ")[0], na=False)]
+        # Define sigla baseada no input do usuário
+        if "RECIFE" in t_user_upper or "TIP" in t_user_upper:
+            sigla = "TIP"
+            prefixo_terminal = "TIP"
+        elif "CARUARU" in t_user_upper or "CAR" in t_user_upper:
+            sigla = "CAR"
+            prefixo_terminal = "CAR"
+        elif "GARANHUNS" in t_user_upper or "GAR" in t_user_upper:
+            sigla = "GAR"
+            prefixo_terminal = "GAR"
+        elif "ARCOVERDE" in t_user_upper or "ARC" in t_user_upper:
+            sigla = "ARC"
+            prefixo_terminal = "ARC"
+        elif "PETROLINA" in t_user_upper or "PET" in t_user_upper:
+            sigla = "PET"
+            prefixo_terminal = "PET"
+        elif "SERRA" in t_user_upper or "ST" in t_user_upper:
+            sigla = "SER"
+            prefixo_terminal = "SER"
+
+        if sigla:
+            # Busca onde tem a SIGLA (ex: GAR) OU o nome da cidade
+            # Isso evita que o filtro falhe se a base tiver "Terminal Garanhuns" sem "GAR"
+            term_col = df_filt["Localização/VIA"].str.upper()
+            mask_sigla = term_col.str.contains(sigla, na=False)
+            
+            nome_cidade = t_user_upper.replace("TERMINAL", "").replace("DE", "").strip().split()[0]
+            if len(nome_cidade) > 3:
+                mask_nome = term_col.str.contains(nome_cidade, na=False)
+                df_filt = df_filt[mask_sigla | mask_nome]
+            else:
+                df_filt = df_filt[mask_sigla]
 
     if df_filt.empty: return resultado
 
-    melhor_ratio = 0
+    melhor_score = 0
     melhor_row = None
     
     cols_busca = [c for c in ["Evidencia_Agregada", "Evidencia_Desagregada"] if c in df_filt.columns]
 
     for _, row in df_filt.iterrows():
         txt_base_raw = " ".join([str(row.get(c, "")) for c in cols_busca])
-        txt_base_limpo = _limpar_texto_para_match(txt_base_raw)
         
-        # Lógica Fuzzy
-        if len(texto_limpo) > 5 and texto_limpo in txt_base_limpo:
-            ratio = 1.0
-        elif len(txt_base_limpo) > 5 and txt_base_limpo in texto_limpo:
-            ratio = 0.99 
+        # A. Keyword Match (Poderoso)
+        tokens_base = _extrair_palavras_chave(txt_base_raw)
+        
+        if len(tokens_busca) > 0:
+            interseccao = tokens_busca.intersection(tokens_base)
+            score_keywords = len(interseccao) / len(tokens_busca)
         else:
-            ratio = SequenceMatcher(None, texto_limpo, txt_base_limpo).ratio()
+            score_keywords = 0
+        
+        # B. Sequence Match (Desempate)
+        txt_base_seq = _limpar_texto_simples(txt_base_raw)
+        score_seq = SequenceMatcher(None, texto_busca_seq, txt_base_seq).ratio()
+        
+        # Lógica de Pontuação:
+        # Se 40% das palavras baterem (ex: 2 de 5), já consideramos um candidato forte.
+        # Damos preferência ao score de keywords, usando seq como fallback.
+        if score_keywords >= 0.40:
+            # Boost no score se tiver keywords fortes
+            score_final = max(score_keywords, 0.80) 
+        else:
+            score_final = score_seq
             
-        if ratio > melhor_ratio:
-            melhor_ratio = ratio
+        if score_final > melhor_score:
+            melhor_score = score_final
             melhor_row = row
 
-    if melhor_row is not None and melhor_ratio > 0.70:
+    # Threshold de 0.40 (40%) pega casos difíceis como "Muro externo" vs "Muro lateral"
+    # pois "Muro" e "Pintura" batem (2 palavras de 4 = 50% match).
+    if melhor_row is not None and melhor_score >= 0.40:
         
         evidencia_chave = str(melhor_row.get("Evidencia_Agregada", "")).strip()
-
         item_raw = str(melhor_row.get("Item", "")).strip()
         base_id = item_raw.split(".")[0] if "." in item_raw else item_raw
 
@@ -180,17 +244,14 @@ def encontrar_dados_na_base(
              linhas_texto.append(evidencia_chave)
         
         for _, row_g in df_grupo.iterrows():
-            item_n = str(row_g.get("Item", "")).strip() # ex: 02.1
+            item_n = str(row_g.get("Item", "")).strip()
             desag = str(row_g.get("Evidencia_Desagregada", "")).strip()
-            
             if desag and desag.lower() != 'nan' and desag != evidencia_chave:
-
                 linhas_texto.append(f"{item_n}  {desag}")
         
         if not linhas_texto:
             desc_final = texto_busca
         else:
-  
             linhas_texto = list(dict.fromkeys(linhas_texto))
             desc_final = "\n".join(linhas_texto)
 
@@ -201,9 +262,9 @@ def encontrar_dados_na_base(
             "data_vistoria": formatar_data_df(melhor_row.get("DATA FISC", ""))
         }
 
-    
     return resultado
 
+# --- (O RESTANTE DAS FUNÇÕES DE FORMATAÇÃO PERMANECE IGUAL) ---
 def _set_run_language(run, lang_code: str = "pt-BR") -> None:
     rPr = run._element.get_or_add_rPr()
     lang = OxmlElement("w:lang")
@@ -483,14 +544,13 @@ def adicionar_duas_imagens_lado_a_lado(doc: Document, fotos_dir: str, nome_foto1
         else: p.add_run(f"🚫 {nome_foto1}")
         adicionar_legenda_formatada_na_celula(c_leg, legenda1)
     else:
-        # Lógica para DUAS imagens lado a lado
         largura_celula_img = LARGURA_IMAGEM_LADO_A_LADO
         largura_foto_interna = Inches(3.0) 
         
         for r in range(2):
             for c in range(2):
                 tabela.cell(r, c).width = largura_celula_img
- 
+
         p1 = tabela.cell(0, 0).paragraphs[0]
         p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
         b1 = processar_imagem_para_relatorio(os.path.join(fotos_dir, nome_foto1))

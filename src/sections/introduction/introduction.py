@@ -20,7 +20,6 @@ def _formatar_data(valor_data) -> str:
 
     return str(valor_data)
 
-
 def gerar_secao_introducao(doc: Document, row: dict):
     """
     Gera a seção '1. INTRODUÇÃO' do relatório, formatando texto e datas conforme os dados da planilha.
