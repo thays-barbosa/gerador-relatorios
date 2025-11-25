@@ -64,6 +64,14 @@ def _limpar_terminal_para_busca(terminal_nome: str) -> str:
     # Retorna o nome do terminal em maiúsculas com espaços substituídos por underscore
     return str(terminal_nome).upper().replace(" ", "_")
 
+def _limpar_processo_para_match(processo: str) -> str:
+    """Padroniza o texto do processo (ex: 'CTR 01/2025' -> '01/2025')."""
+    t = str(processo).upper().strip()
+    # Remove 'CTR', 'N°', ':' e múltiplos espaços, mantendo apenas o número do processo
+    t = re.sub(r'(CTR\s*Nº?|Nº?|:)\s*', ' ', t) 
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
 # --- FUNÇÃO PRINCIPAL DE BUSCA ---
 
 def _ajustar_numero_nc(ano: str, processo: str, monit: str, item: str, prefixo_terminal: str) -> str:
@@ -111,8 +119,17 @@ def encontrar_dados_na_base(
 
     # Filtro Processo
     if "PROCESSO" in df_filt.columns and proc_user:
-        p_clean = proc_user.replace("CTR", "").strip()
-        df_filt = df_filt[df_filt["PROCESSO"].str.upper().str.contains(p_clean, na=False)]
+        # Aplica limpeza para padronizar o input do usuário e o dado da base
+        p_clean_user = _limpar_processo_para_match(proc_user)
+        
+        # Cria uma coluna temporária limpa no DataFrame para fazer o filtro
+        df_filt['PROCESSO_LIMPO'] = df_filt["PROCESSO"].apply(_limpar_processo_para_match)
+        
+        # Filtra onde a versão limpa do processo da base contém o valor limpo do usuário
+        df_filt = df_filt[df_filt["PROCESSO_LIMPO"].str.contains(p_clean_user, na=False)]
+        
+        # Remove a coluna temporária após o filtro
+        df_filt = df_filt.drop(columns=['PROCESSO_LIMPO'])
 
     # Filtro Tipo_Doc (Monit)
     if "TIPO_DOC" in df_filt.columns and monit_user:
@@ -206,7 +223,8 @@ def encontrar_dados_na_base(
             "situacao": str(melhor_row.get("Status-ARPE", "N/A")).strip(),
             "data_vistoria": formatar_data_df(melhor_row.get("DATA FISC", ""))
         }
-        print(f"  ✅ Match ({melhor_ratio:.2f}) -> {id_final_formatado}")
+        # A linha de print abaixo foi comentada para silenciar a saída.
+        # print(f"  ✅ Match ({melhor_ratio:.2f}) -> {id_final_formatado}")
     
     return resultado
 
