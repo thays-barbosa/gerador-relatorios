@@ -15,10 +15,6 @@ from utils import (
     LARGURA_PADRAO_IN
 )
 
-# ============================================================
-#               FUNÇÕES DE LIMPEZA E FORMATAÇÃO
-# ============================================================
-
 def _limpar_inicio_texto(texto: str) -> str:
     """
     Remove padrões redundantes do início.
@@ -28,12 +24,10 @@ def _limpar_inicio_texto(texto: str) -> str:
     if not texto: return ""
     s = str(texto).strip()
     
-    # Regex para pegar "SIGLA 00 - " ou "00.0 - "
     padrao = r'^(?:[A-Z]{3}[\s\-]*)?\d+(?:[._]\d+)?\s*[-:–)]*\s*'
     
     texto_limpo = re.sub(padrao, '', s)
-    
-    # PROTEÇÃO CONTRA SUMIÇO: 
+  
     if not texto_limpo and s:
         return s
 
@@ -52,27 +46,21 @@ def _inserir_texto_nc(doc: Document, nc_titulo_identificador: str, descricao_bru
     linhas = [l.strip() for l in descricao_bruta.split("\n") if l.strip()]
     if not linhas: linhas = ["Descrição indisponível."]
 
-    # --- ITEM PRINCIPAL ---
     paragrafo_nc = doc.add_paragraph()
-    
-    # Título (ID)
+  
     run_titulo = paragrafo_nc.add_run(f"Não Conformidade {nc_titulo_identificador}")
     aplicar_estilo_corpo(run_titulo, negrito=True)
     run_titulo.underline = True
 
-    # Separador
-    run_traco = paragrafo_nc.add_run(" – ")
+    run_traco = paragrafo_nc.add_run("  ")
     aplicar_estilo_corpo(run_traco)
 
-    # Texto Limpo
     texto_principal = _limpar_inicio_texto(linhas[0])
     run_desc = paragrafo_nc.add_run(texto_principal)
     aplicar_estilo_corpo(run_desc)
 
     paragrafo_nc.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
 
-    # --- SUBITENS ---
-    # Tenta descobrir o prefixo base (ex: TIP 2025_)
     base_prefixo = ""
     match_base = re.match(r"([A-Z]{3}\s\d{4}_)", nc_titulo_identificador)
     if match_base:
@@ -85,11 +73,10 @@ def _inserir_texto_nc(doc: Document, nc_titulo_identificador: str, descricao_bru
             p_sub.paragraph_format.space_after = Pt(2)
             p_sub.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
 
-            # Verifica se a linha começa com número (ex: 06.1 ou TIP 06.1)
             match_sub = re.match(r'^(?:[A-Z]{3}[\s\-]*)?(\d+[._]\d+)\s*[-:–]?\s*(.*)', sub_item_raw)
 
             if match_sub:
-                # É SUBITEM: Formata com ID em Negrito
+                
                 numero_sub = match_sub.group(1).replace("_", ".") 
                 texto_restante = match_sub.group(2)
                 
@@ -100,12 +87,12 @@ def _inserir_texto_nc(doc: Document, nc_titulo_identificador: str, descricao_bru
                 run_sub_id = p_sub.add_run(f"Não Conformidade {id_completo}")
                 aplicar_estilo_corpo(run_sub_id, negrito=True)
                 
-                p_sub.add_run(" – ")
+                p_sub.add_run("  ")
                 
                 run_txt = p_sub.add_run(texto_final)
                 aplicar_estilo_corpo(run_txt)
             else:
-                # É TEXTO CORRIDO: Apenas limpa e exibe
+ 
                 texto_limpo = _limpar_inicio_texto(sub_item_raw)
                 run_txt = p_sub.add_run(texto_limpo)
                 aplicar_estilo_corpo(run_txt)
@@ -145,23 +132,20 @@ def gerar_secao_nao_conformidades_constatadas(
 ):
     id_fiscalizacao = row["ID da Fiscalização"]
     processo_ctr = processo_info.get("Processo CTR Nº", "XX/XXXX")
-    
-    # --- AJUSTE AQUI: Lógica para separar e formatar as Cartas ---
+  
     cartas_raw = str(processo_info.get("Carta SAP/PER/ARPE Nº", "")).strip()
     texto_cartas = ""
     
     if cartas_raw and cartas_raw.lower() != "nan":
-        # Divide por ponto e vírgula
+ 
         partes_cartas = [p.strip() for p in cartas_raw.split(";") if p.strip()]
         
         if partes_cartas:
-            # Formata cada parte adicionando o prefixo
+  
             cartas_formatadas = [f"Carta SAP/PER/ARPE N° {p}" for p in partes_cartas]
-            
-            # Junta com " e "
+     
             juncao_cartas = " e ".join(cartas_formatadas)
-            
-            # Monta o texto final
+   
             texto_cartas = f"constante da {juncao_cartas}, "
 
     adicionar_titulo_secao(doc, "3. RESULTADO DAS VISTORIAS DAS NÃO CONFORMIDADES PENDENTES")
@@ -191,17 +175,15 @@ def gerar_secao_nao_conformidades_constatadas(
         ncs_processadas = set()
 
         for _, nc in dados_terminal.iterrows():
-            # Lógica original de busca
+
             raw_key = str(nc.get("Legenda da Foto", "")).strip()
             if not raw_key or raw_key.lower() == "nan":
                 raw_key = str(nc.get("Constatação", "")).strip()
 
-            # AQUI: Usa o split inteligente para pegar TIP 01, TIP 02...
             constatacoes = _safe_split(raw_key)
             infos = _safe_split(nc.get("Informação SOCICAM", ""))
             analises = _safe_split(nc.get("Análise da Arpe", ""))
 
-            # Nivela o tamanho das listas
             max_len = max(len(constatacoes), len(infos), len(analises))
             constatacoes += [""] * (max_len - len(constatacoes))
             infos += ["N/A"] * (max_len - len(infos))
@@ -220,7 +202,6 @@ def gerar_secao_nao_conformidades_constatadas(
                     if dados["id"] in ncs_processadas: continue
                     ncs_processadas.add(dados["id"])
 
-                # Chama a função de inserção corrigida
                 _inserir_texto_nc(doc, dados["id"], dados["descricao"])
                 _inserir_linhas_info(doc, infos[i], const, analises[i])
                 doc.add_paragraph().paragraph_format.space_after = Pt(12)

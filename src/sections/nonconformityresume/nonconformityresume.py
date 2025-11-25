@@ -29,30 +29,23 @@ def _aplicar_estilo_resumo(run, negrito: bool = False):
 def _formatar_nome_terminal(nome_bruto: str) -> str:
     return str(nome_bruto).upper().replace("TERMINAL DE ", "").replace("TERMINAL DO ", "").strip()
 
-# --- SPLIT INTELIGENTE APLICADO AQUI ---
 def _safe_split_resumo(texto: Any) -> List[str]:
     """
     Divide por ';' ou Enter ou ':' (protegendo horários como 10:30).
     """
     s = str(texto).strip()
     if not s or s.lower() == 'nan': return []
-    
-    # Regex:
-    # [;\n]    -> Ponto e vírgula OU quebra de linha
-    # |        -> OU
-    # :(?!\d)  -> Dois pontos, DESDE QUE não seja seguido de um número
+
     partes = re.split(r'[;\n]|:(?!\d)', s)
     
     return [x.strip() for x in partes if x.strip()]
 
-# --- FUNÇÃO DE LIMPEZA PARA A TABELA ---
 def _limpar_redundancia_tabela(texto: str) -> str:
     """Remove 'TIP 01', 'CAR 05' etc. do início."""
     if not texto: return ""
     padrao = r'^([A-Z]{3}\s+)?\d+([._]\d+)?\s*[-:–]?\s*'
     limpo = re.sub(padrao, '', str(texto).strip())
     
-    # Proteção: se limpou tudo, retorna original
     if not limpo and texto: return str(texto)
 
     if limpo and limpo[0].islower():
@@ -120,7 +113,6 @@ def gerar_secao_resumo_nao_conformidades(
             if not raw_const or raw_const.lower() == "nan":
                  raw_const = str(linha.get("Constatação", "")).strip()
 
-            # AQUI: Usa o split inteligente
             constatacoes = _safe_split_resumo(raw_const)
             
             raw_info = str(linha.get("Informação SOCICAM carta", "")).strip()
@@ -176,8 +168,7 @@ def gerar_secao_resumo_nao_conformidades(
             
             r_id = p_nc.add_run(f"{item['id']}")
             _aplicar_estilo_resumo(r_id, negrito=True)
-            
-            # Limpeza aplicada aqui
+         
             desc_limpa = _limpar_redundancia_tabela(item['desc'])
             
             r_desc = p_nc.add_run(f" – {desc_limpa}") 

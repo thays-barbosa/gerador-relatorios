@@ -8,9 +8,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import pandas as pd
 from tqdm import tqdm
 import win32com.client as win32
-import re  # IMPORT NECESSÁRIO PARA A VALIDAÇÃO DE PROCESSO
+import re  
 
-# --- SEÇÕES ---
 from sections.introduction.introduction import gerar_secao_introducao
 from sections.objective.objective import gerar_secao_objetivo
 from sections.anexo.anexo import gerar_secao_anexo_fotos
@@ -19,7 +18,6 @@ from sections.nonconformityresume.nonconformityresume import gerar_secao_resumo_
 from sections.finalconsiderations.finalconsiderations import gerar_secao_consideracoes_finais
 from sections.summary.summary import inserir_quebra_e_sumario
 
-# --- UTILS ---
 from utils import (
     adicionar_texto_centralizado,
     adicionar_paragrafo_justificado,
@@ -46,7 +44,7 @@ def atualizar_toc_e_converter_para_pdf(caminho_docx: str, caminho_pdf: str) -> b
         doc = word.Documents.Open(caminho_docx)
         doc.Fields.Update()
         doc.Save()
-        doc.SaveAs2(caminho_pdf, FileFormat=17) # 17 é o código para PDF
+        doc.SaveAs2(caminho_pdf, FileFormat=17) 
         doc.Close(SaveChanges=False)
         word.Quit()
         return True
@@ -73,7 +71,7 @@ def gerar_relatorio() -> None:
         sys.exit(1)
 
     try:
-        # Carrega os DataFrames necessários para a lógica
+        
         monitoramento_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Monitoramento")
         nao_conformidades_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Não-conformidades ")
         processos_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Processos")
@@ -86,11 +84,6 @@ def gerar_relatorio() -> None:
         print(f"❌ Erro ao ler planilha: {e}")
         sys.exit(1)
 
-    # ============================================================
-    # 🔍 ETAPA 1 — VERIFICAR PENDENTES
-    # ============================================================
-
-    # Garantir coluna STATUS
     if COLUNA_STATUS not in monitoramento_df.columns:
         monitoramento_df[COLUNA_STATUS] = ""
 
@@ -105,51 +98,41 @@ def gerar_relatorio() -> None:
 
     pendentes = monitoramento_df[~mascara_concluido].copy()
 
-    # Se NÃO existem pendentes → ENCERRAR
     if pendentes.empty:
         print("\n✅ Todos os relatórios já foram gerados anteriormente, por favor, verifique a planilha.")
         input("Pressione ENTER para sair...")
         return
         
-    # --- Se há pendentes, as mensagens de carregamento de dados APENAS são exibidas aqui
     print("\n--- Carregando Dados da Planilha Principal ---")
     print(f"\n🚀 Existem {len(pendentes)} relatórios pendentes para gerar.\n")
 
-    # --- CARREGAR BASE NC (SÓ SE HÁ PENDENTES) ---
     print("\n--- Carregando Base de Não Conformidades ---")
     if os.path.exists(CAMINHO_BASE_NC):
-        # A chamada a carregar_base_nc JÁ IMPRIME A MENSAGEM de "Base carregada" (arquivo utils.py)
+     
         df_base_nc = carregar_base_nc(CAMINHO_BASE_NC)
-        # A linha duplicada que causava o problema foi removida daqui.
+       
     else:
         print(f"⚠️ Planilha Base não encontrada em: {CAMINHO_BASE_NC}")
         df_base_nc = pd.DataFrame()
 
 
-    # ======================================
-    # 🔵 ETAPA 2 — COLETAR E VALIDAR DADOS INSTANTANEAMENTE
-    # ======================================
-
     print("\n📋 CONFIGURAÇÃO DE FILTROS DA BASE DE DADOS:")
 
-    # 1. COLETAR E VALIDAR ANO
+ 
     while True:
         ano_input = input(">> 1. Digite o ANO (ex: 2025): ").strip()
         if not ano_input: continue
-        
-        # VALIDAÇÃO DO ANO
+     
         if not df_base_nc.empty and str(ano_input) not in df_base_nc["Ano"].astype(str).str.strip().unique():
             print(f"❌ O ANO '{ano_input}' não consta na Base de Não Conformidades. Pressione ENTER para sair...")
             input()
             sys.exit(1)
         break
 
-    # 2. COLETAR E VALIDAR PROCESSO
     while True:
         proc_input = input(">> 2. Digite o PROCESSO (ex: CTR 01/2025 ou ctr 01/2025): ").strip()
         if not proc_input: continue
-        
-        # VALIDAÇÃO DO PROCESSO 
+      
         if not df_base_nc.empty:
             # Lógica de limpeza para comparação
             proc_clean_user = re.sub(r'(CTR\s*Nº?|Nº?|:)\s*', ' ', proc_input.upper().strip())
@@ -168,12 +151,10 @@ def gerar_relatorio() -> None:
                 sys.exit(1)
         break
 
-    # 3. COLETAR E VALIDAR MONITORAMENTO
     while True:
         monit_input = input(">> 3. Qual é o Nº do Monitoramento? (ex: 1): ").strip()
         if not monit_input: continue
-        
-        # VALIDAÇÃO DO MONITORAMENTO
+ 
         if not df_base_nc.empty and "TIPO_DOC" in df_base_nc.columns:
             mask_monit_num = (df_base_nc["TIPO_DOC"].str.upper().str.contains("MONIT", na=False)) & \
                              (df_base_nc["TIPO_DOC"].astype(str).str.contains(str(monit_input), na=False))
@@ -183,14 +164,10 @@ def gerar_relatorio() -> None:
                 input()
                 sys.exit(1)
         break
-    
-    # =====================================================
-    # 📂 ETAPA 2.2 — VALIDAÇÃO DOS CAMINHOS DE PASTAS
-    # =====================================================
+
 
     print("\n--- Configuração de Pastas ---")
 
-    # VALIDAÇÃO PASTA DE FISCALIZAÇÃO (CAMINHO_CTR)
     CAMINHO_CTR = ""
     while True:
         pasta_contrato_input = input(">> Digite a pasta de Fiscalização (Ex: CTR-01-2025 ou ctr-01-2025): ").strip()
@@ -211,7 +188,6 @@ def gerar_relatorio() -> None:
 
         break
 
-    # VALIDAÇÃO PASTA DO MONITORAMENTO (CAMINHO_RAIZ_FOTOS)
     CAMINHO_RAIZ_FOTOS = ""
     while True:
         pasta_monitoramento_input = input(">> Digite a Pasta do Monitoramento (Ex: M0 ou m0): ").strip()
@@ -230,10 +206,6 @@ def gerar_relatorio() -> None:
         
         break
 
-    # =====================================================
-    # 🔄 ETAPA 3 — LOOP PARA GERAR RELATÓRIOS PENDENTES
-    # =====================================================
-
     print(f"\n🚀 Gerando {len(pendentes)} relatórios pendentes...\n")
 
     for idx in tqdm(pendentes.index, desc="Progresso"):
@@ -246,7 +218,6 @@ def gerar_relatorio() -> None:
         doc = Document()
         doc.sections[0].top_margin = Inches(0.25)
 
-        # CAPA
         adicionar_texto_centralizado(doc, "COORDENADORIA DE TRANSPORTES E RODOVIAS")
         doc.paragraphs[-1].paragraph_format.space_after = Pt(0)
         doc.add_paragraph()
@@ -271,7 +242,6 @@ def gerar_relatorio() -> None:
         doc.add_paragraph()
         adicionar_texto_centralizado(doc, "Recife, data de assinatura eletrônica", negrito=False)
 
-        # SUMÁRIO + SEÇÕES
         inserir_quebra_e_sumario(doc)
         gerar_secao_introducao(doc, row)
         gerar_secao_objetivo(doc, row, processo_info, nao_conformidades_df)
@@ -297,7 +267,6 @@ def gerar_relatorio() -> None:
             except Exception as exc:
                 tqdm.write(f"⚠️ Erro ao gerar anexos: {exc}")
 
-        # SALVAR DOCX + PDF
         nome_arquivo = f"relatorio_{id_fisc}"
         caminho_docx = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.docx")
         caminho_pdf = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.pdf")
@@ -308,9 +277,6 @@ def gerar_relatorio() -> None:
         if os.path.exists(caminho_docx) and sucesso:
             monitoramento_df.at[idx, COLUNA_STATUS] = "VERDADEIRO"
 
-    # =====================================================
-    # 💾 ETAPA FINAL — SALVAR ALTERAÇÕES NA PLANILHA
-    # =====================================================
 
     if not arquivo_em_uso(CAMINHO_PLANILHA):
         with pd.ExcelWriter(CAMINHO_PLANILHA, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:

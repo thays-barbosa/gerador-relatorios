@@ -19,7 +19,6 @@ def inserir_quebra_e_sumario(doc: Document):
 
     paragrafo_sumario = doc.add_paragraph()
 
-    # Campo inicial do TOC
     run_sumario_begin = paragrafo_sumario.add_run()
     fldChar_begin = OxmlElement("w:fldChar")
     fldChar_begin.set(qn("w:fldCharType"), "begin")

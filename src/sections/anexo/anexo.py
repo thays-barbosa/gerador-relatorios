@@ -15,7 +15,6 @@ from utils import (
     encontrar_dados_na_base
 )
 
-# --- SPLIT NÍVEL 1: Separa as NCs (apenas por ponto e vírgula ou enter) ---
 def _safe_split_nc_separator(content: str) -> List[str]:
     """
     Divide apenas por ';' ou quebra de linha.
@@ -61,17 +60,14 @@ def _buscar_arquivos_flexivel(id_excel: str, lista_arquivos: List[str]) -> List[
     """
     id_limpo = id_excel.strip().upper()
     
-    # 1. Tentativa Exata
     matches = [f for f in lista_arquivos if f.upper().startswith(id_limpo)]
     if matches: return sorted(matches)
     
-    # 2. Tentativa sem sufixo de ponto
     if "." in id_limpo:
         id_base = id_limpo.rsplit(".", 1)[0]
         matches = [f for f in lista_arquivos if f.upper().startswith(id_base)]
         if matches: return sorted(matches)
 
-    # 3. Tentativa Normalizada
     id_norm = re.sub(r"[_\-\s\.]", "", id_limpo)
     matches_norm = []
     for f in lista_arquivos:
@@ -81,14 +77,12 @@ def _buscar_arquivos_flexivel(id_excel: str, lista_arquivos: List[str]) -> List[
             matches_norm.append(f)
     if matches_norm: return sorted(matches_norm)
 
-    # 4. Tentativa por "CONTÉM"
     if len(id_limpo) > 5:
         matches_contains = [f for f in lista_arquivos if id_limpo in f.upper()]
         if matches_contains: return sorted(matches_contains)
 
     return []
 
-# --- LIMPEZA DE TÍTULO ---
 def _limpar_redundancia_anexo(texto: str) -> str:
     """Remove 'TIP 01 - ' do início do título da foto."""
     if not texto: return ""
@@ -156,7 +150,7 @@ def gerar_secao_anexo_fotos(
 
     for terminal, grupo_terminal in nc_fisc.groupby("Terminal"):
         for _, linha in grupo_terminal.iterrows():
-            # 1. Busca os IDs (Separados por ;)
+           
             raw_key = str(linha.get("Legenda da Foto", "")).strip()
             if not raw_key or raw_key.lower() == "nan":
                  raw_key = str(linha.get("Constatação", "")).strip()
@@ -164,19 +158,17 @@ def gerar_secao_anexo_fotos(
                     raw_key = str(linha.get("Não Conformidade", "")).strip()
 
             textos_busca = _safe_split_nc_separator(raw_key)
-            
-            # 2. Busca as Legendas em Bloco (Separadas por ;)
+    
             raw_legenda = str(linha.get("Legenda da Foto", "")).strip()
             if raw_legenda.lower() == "nan": raw_legenda = ""
             legendas_em_bloco = _safe_split_nc_separator(raw_legenda)
-            
-            # Alinha os blocos (1 Bloco de Legenda para cada ID de NC)
+       
             max_len = len(textos_busca)
             legendas_em_bloco = _adaptar_lista_anexo(legendas_em_bloco, max_len, "")
 
             for i in range(max_len):
                 texto_id = textos_busca[i]
-                bloco_legenda = legendas_em_bloco[i] # Ex: "Foto A : Foto B"
+                bloco_legenda = legendas_em_bloco[i] 
                 
                 if not texto_id: continue
 
@@ -216,16 +208,12 @@ def gerar_secao_anexo_fotos(
                 desc_limpa = _limpar_redundancia_anexo(desc_curta)
                 _adicionar_contexto_nc(doc, id_encontrado, desc_limpa)
 
-                # --- LÓGICA DE LEGENDAS ESPECÍFICA (:) ---
-                # Agora dividimos o bloco pelo divisor ':' para pegar legenda por foto
                 if ":" in bloco_legenda:
                     sub_legendas = [x.strip() for x in bloco_legenda.split(":")]
                 else:
-                    # Se não tem ':', assume que a legenda inteira é para todas (ou para a primeira)
-                    # Se você preferir que repita para todas:
+
                     sub_legendas = [bloco_legenda] * len(fotos_do_item)
-                
-                # Garante que tenha legenda para cada foto encontrada
+ 
                 sub_legendas = _adaptar_lista_anexo(sub_legendas, len(fotos_do_item), "")
                 
                 fotos_em_pares = list(zip_longest(*[iter(fotos_do_item)] * 2, fillvalue=None))

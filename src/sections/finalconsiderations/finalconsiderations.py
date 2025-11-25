@@ -1,6 +1,3 @@
-# CÓDIGO COMPLETO — MESMA ESTRUTURA ORIGINAL + CORREÇÃO DO "1.0º"
-# NADA FOI REORGANIZADO OU SIMPLIFICADO — APENAS ATUALIZADO CONFORME PEDIDO
-
 from datetime import datetime
 from docx.document import Document
 from utils import (
@@ -28,7 +25,7 @@ def _adicionar_assinatura_bloco(
     adicionar_texto_centralizado(doc, cargo, negrito=False)
 
     if matricula:
-        # Garante prefixo “Matrícula” se ainda não estiver no texto
+        
         texto_matricula = matricula
         if "matrícula" not in matricula.lower() and "nº" not in matricula.lower():
             texto_matricula = f"Matrícula: n°{matricula}"
@@ -45,13 +42,12 @@ def gerar_secao_consideracoes_finais(doc: Document, row, nao_conformidades_df, p
 
     adicionar_titulo_secao(doc, "5. CONCLUSÃO")
 
-    # --------- (1) ID DO MONITORAMENTO — ABA NÃO-CONFORMIDADES ----------
     id_fisc = row.get("ID da Fiscalização")
     dados_nc = nao_conformidades_df[nao_conformidades_df["ID da Fiscalização"] == id_fisc]
 
     if not dados_nc.empty:
         raw_num = str(dados_nc.iloc[0].get("ID da Fiscalização", "X"))
-        # CORREÇÃO AQUI: Remove o ".0" se existir (ex: "1.0" vira "1")
+       
         if raw_num.endswith(".0"):
             num_monitoramento = raw_num[:-2]
         else:
@@ -59,19 +55,15 @@ def gerar_secao_consideracoes_finais(doc: Document, row, nao_conformidades_df, p
     else:
         num_monitoramento = "X"
 
-    # --------- (2) CTR ORIGINAL — ABA PROCESSO ----------
     ctr_original = str(processo_info.get("Processo CTR Nº", "xx/xxxx"))
 
-    # --------- (3) PERÍODO DE VISTORIA — ABA PROCESSO ----------
     periodo_vistoria_raw = str(
         processo_info.get("Periodo de Vistoria da ARPE", "xx a xx de MÊS de ANO")
     )
 
-    # Divide por ";" e junta com " e "
     periodos_list = [p.strip() for p in periodo_vistoria_raw.split(";") if p.strip()]
     periodo_vistoria = " e ".join(periodos_list) if periodos_list else "xx a xx de MÊS de ANO"
 
-    # --------- TEXTO FINAL ----------
     texto_conclusao = (
         f"Diante das constatações apontadas neste {num_monitoramento}º Relatório de "
         f"Monitoramento do Relatório de Fiscalização Técnico-Operacional CTR {ctr_original}, "
@@ -81,13 +73,11 @@ def gerar_secao_consideracoes_finais(doc: Document, row, nao_conformidades_df, p
 
     adicionar_paragrafo_justificado(doc, texto_conclusao)
 
-    # --------- DATA ----------
     data_atual = datetime.now().strftime("%d/%m/%Y")
     adicionar_texto_centralizado(doc, f"Recife, {data_atual}.", negrito=False, tamanho_fonte=11)
 
     doc.add_paragraph()
 
-    # --------- (4) ASSINANTES — MATRÍCULAS DINÂMICAS ----------
     assinantes = str(row.get("Assinatura", "")).split(";")
     matriculas = str(row.get("Matriculas das Pessoas Responsáveis", "")).split(";")
 
@@ -105,7 +95,6 @@ def gerar_secao_consideracoes_finais(doc: Document, row, nao_conformidades_df, p
 
     adicionar_texto_esquerda(doc, "Ciente.")
 
-    # --------- (5) COORDENADOR ----------
     coordenador = str(row.get("Coordenador", "")).strip()
     matricula_coordenador = str(row.get("Matrícula Coordenador", "Matrícula: nº209640/01"))
 

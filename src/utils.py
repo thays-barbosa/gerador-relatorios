@@ -22,11 +22,9 @@ ALTURA_IMAGEM_LADO_A_LADO = Inches(2.7)
 _COR_CINZA_SOMBRA_HEX = "BFBFBF"
 _COR_PRETO_RGB = (0, 0, 0)
 
-# --- FUNÇÕES DE CARREGAMENTO E LIMPEZA DE DADOS ---
-
 def carregar_base_nc(caminho_base: str) -> pd.DataFrame:
     try:
-        # Lê como string para manter formatação de IDs (ex: 02.1)
+       
         df = pd.read_excel(caminho_base, sheet_name="BASE", dtype=str)
         df.columns = df.columns.str.strip()
         df = df.dropna(how='all')
@@ -44,7 +42,7 @@ def carregar_base_nc(caminho_base: str) -> pd.DataFrame:
 
 def _remover_acentos(texto: str) -> str:
     try:
-        # Normaliza e remove caracteres combinantes (acentos, cedilha, etc.)
+       
         return "".join([c for c in unicodedata.normalize('NFKD', str(texto)) if not unicodedata.combining(c)])
     except: return str(texto)
 
@@ -61,18 +59,15 @@ def _limpar_texto_para_match(texto: str) -> str:
     return " ".join(t.split())
 
 def _limpar_terminal_para_busca(terminal_nome: str) -> str:
-    # Retorna o nome do terminal em maiúsculas com espaços substituídos por underscore
+    
     return str(terminal_nome).upper().replace(" ", "_")
 
 def _limpar_processo_para_match(processo: str) -> str:
     """Padroniza o texto do processo (ex: 'CTR 01/2025' -> '01/2025')."""
     t = str(processo).upper().strip()
-    # Remove 'CTR', 'N°', ':' e múltiplos espaços, mantendo apenas o número do processo
     t = re.sub(r'(CTR\s*Nº?|Nº?|:)\s*', ' ', t) 
     t = re.sub(r'\s+', ' ', t).strip()
     return t
-
-# --- FUNÇÃO PRINCIPAL DE BUSCA ---
 
 def _ajustar_numero_nc(ano: str, processo: str, monit: str, item: str, prefixo_terminal: str) -> str:
     """
@@ -83,10 +78,8 @@ def _ajustar_numero_nc(ano: str, processo: str, monit: str, item: str, prefixo_t
         
     item_limpo = str(item).strip().replace('.', '_', 1).replace('.', '').replace('_', '.', 1).strip()
     
-    # Remove o prefixo do terminal ou ano se já estiverem no item (para evitar TIP TIP...)
     item_sem_prefixo = re.sub(r'([A-Z]{3}\s)?(\d{4}_)?', '', item_limpo).strip()
 
-    # Formato final: PREFIXO ANO_ITEM (Ex: TIP 2025_02.1)
     return f"{prefixo_terminal} {ano}_{item_sem_prefixo}"
 
 
@@ -110,14 +103,11 @@ def encontrar_dados_na_base(
 
     if df_base.empty or not texto_limpo: return resultado
 
-    # --- 1. FILTROS ---
     df_filt = df_base.copy()
 
-    # Filtro Ano
     if "Ano" in df_filt.columns and ano_user and str(ano_user).isdigit():
         df_filt = df_filt[df_filt["Ano"].astype(str).str.strip() == str(ano_user)]
 
-    # Filtro Processo
     if "PROCESSO" in df_filt.columns and proc_user:
         # Aplica limpeza para padronizar o input do usuário e o dado da base
         p_clean_user = _limpar_processo_para_match(proc_user)
@@ -131,7 +121,6 @@ def encontrar_dados_na_base(
         # Remove a coluna temporária após o filtro
         df_filt = df_filt.drop(columns=['PROCESSO_LIMPO'])
 
-    # Filtro Tipo_Doc (Monit)
     if "TIPO_DOC" in df_filt.columns and monit_user:
         mask_monit = df_filt["TIPO_DOC"].str.upper().str.contains("MONIT", na=False)
         mask_num = df_filt["TIPO_DOC"].str.contains(str(monit_user), na=False)
@@ -141,22 +130,19 @@ def encontrar_dados_na_base(
     if terminal_user and "Localização/VIA" in df_filt.columns:
         t_limpo_busca = _limpar_terminal_para_busca(terminal_user).replace("_", " ")
 
-        # Tenta inferir a sigla para o ID formatado
         match_sigla = re.search(r"\((.*?)\)", terminal_user.upper())
         if match_sigla:
             prefixo_terminal = match_sigla.group(1)
         elif "RECIFE" in t_limpo_busca or "TIP" in t_limpo_busca:
             prefixo_terminal = "TIP"
         else:
-            # Pega as 3 primeiras letras da primeira palavra (se houver)
+  
             prefixo_terminal = t_limpo_busca.split(" ")[0][:3]
         
-        # Filtra pelo nome do terminal (ou sigla)
         df_filt = df_filt[df_filt["Localização/VIA"].str.upper().str.contains(t_limpo_busca.split(" ")[0], na=False)]
 
     if df_filt.empty: return resultado
 
-    # --- 2. MATCH (BUSCA INVERSA + FUZZY) ---
     melhor_ratio = 0
     melhor_row = None
     
@@ -178,42 +164,33 @@ def encontrar_dados_na_base(
             melhor_ratio = ratio
             melhor_row = row
 
-    # --- 3. AGRUPAMENTO DE ITENS E FORMATAÇÃO ---
     if melhor_row is not None and melhor_ratio > 0.70:
         
         evidencia_chave = str(melhor_row.get("Evidencia_Agregada", "")).strip()
-        
-        # Define o ID Base (ex: "02")
+
         item_raw = str(melhor_row.get("Item", "")).strip()
         base_id = item_raw.split(".")[0] if "." in item_raw else item_raw
 
-        # Formata o ID Principal: "TIP 2025_02"
         id_final_formatado = _ajustar_numero_nc(ano_user, proc_user, monit_user, base_id, prefixo_terminal)
 
-        # Caso com sub-itens (Agrupamento)
         df_grupo = df_filt[df_filt["Item"].astype(str).str.strip().str.startswith(base_id)].sort_values(by="Item")
 
         linhas_texto = []
-        
-        # 1. Adiciona o texto principal (Evidencia Agregada) - Limpo de prefixos
         if evidencia_chave and evidencia_chave.lower() != 'nan':
              linhas_texto.append(evidencia_chave)
         
-        # 2. Adiciona os itens desagregados formatados (CORREÇÃO CRUCIAL AQUI)
         for _, row_g in df_grupo.iterrows():
             item_n = str(row_g.get("Item", "")).strip() # ex: 02.1
             desag = str(row_g.get("Evidencia_Desagregada", "")).strip()
             
-            # Sub-item deve ser adicionado se for válido E diferente da evidência agregada
             if desag and desag.lower() != 'nan' and desag != evidencia_chave:
-                # ✅ Formato de retorno CORRETO: "02.1 – Espelho oxidado" 
-                # Sem o prefixo do terminal (TIP) na frente.
-                linhas_texto.append(f"{item_n} – {desag}")
+
+                linhas_texto.append(f"{item_n}  {desag}")
         
         if not linhas_texto:
             desc_final = texto_busca
         else:
-            # Garante que a primeira linha (Evidencia Agregada) seja única
+  
             linhas_texto = list(dict.fromkeys(linhas_texto))
             desc_final = "\n".join(linhas_texto)
 
@@ -223,12 +200,9 @@ def encontrar_dados_na_base(
             "situacao": str(melhor_row.get("Status-ARPE", "N/A")).strip(),
             "data_vistoria": formatar_data_df(melhor_row.get("DATA FISC", ""))
         }
-        # A linha de print abaixo foi comentada para silenciar a saída.
-        # print(f"  ✅ Match ({melhor_ratio:.2f}) -> {id_final_formatado}")
+
     
     return resultado
-
-# --- FUNÇÕES VISUAIS ---
 
 def _set_run_language(run, lang_code: str = "pt-BR") -> None:
     rPr = run._element.get_or_add_rPr()
@@ -344,7 +318,6 @@ def _adicionar_contexto_nc(doc: Document, nc_id: str, constatacao: str):
     run_id = par.add_run(f"{nc_id.strip()}")
     aplicar_estilo_titulo(run_id)
     
-    # Pega apenas a primeira linha para o cabeçalho da foto
     texto_limpo = constatacao.split('\n')[0].strip()
     run_constatacao = par.add_run(f" - {texto_limpo}")
     
@@ -517,22 +490,19 @@ def adicionar_duas_imagens_lado_a_lado(doc: Document, fotos_dir: str, nome_foto1
         for r in range(2):
             for c in range(2):
                 tabela.cell(r, c).width = largura_celula_img
-                
-        # Imagem 1
+ 
         p1 = tabela.cell(0, 0).paragraphs[0]
         p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
         b1 = processar_imagem_para_relatorio(os.path.join(fotos_dir, nome_foto1))
         if b1: p1.add_run().add_picture(b1, width=largura_foto_interna, height=ALTURA_IMAGEM_LADO_A_LADO)
         else: p1.add_run(f"🚫 {nome_foto1}")
-        
-        # Imagem 2
+
         p2 = tabela.cell(0, 1).paragraphs[0]
         p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
         b2 = processar_imagem_para_relatorio(os.path.join(fotos_dir, nome_foto2))
         if b2: p2.add_run().add_picture(b2, width=largura_foto_interna, height=ALTURA_IMAGEM_LADO_A_LADO)
         else: p2.add_run(f"🚫 {nome_foto2}")
 
-        # Legendas
         adicionar_legenda_formatada_na_celula(tabela.cell(1, 0), legenda1)
         adicionar_legenda_formatada_na_celula(tabela.cell(1, 1), legenda2 or "")
         
