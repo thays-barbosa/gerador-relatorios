@@ -5,8 +5,6 @@ from typing import Any, Dict, List
 import pandas as pd
 import re
 
-# Presume-se que 'utils' contém as funções auxiliares necessárias
-# A função 'aplicar_estilo_corpo' é crucial para as correções.
 from utils import (
     adicionar_paragrafo_justificado,
     adicionar_titulo_secao,
@@ -14,124 +12,103 @@ from utils import (
     aplicar_estilo_corpo,
     aplicar_estilo_titulo,
     encontrar_dados_na_base,
-    adicionar_imagem,
-    processar_imagem_para_relatorio,
-    LARGURA_PADRAO_IN,
-    adicionar_duas_imagens_lado_a_lado 
+    LARGURA_PADRAO_IN
 )
 
 # ============================================================
-#              CORREÇÃO PRINCIPAL IMPLEMENTADA
+#               FUNÇÕES DE LIMPEZA E FORMATAÇÃO
 # ============================================================
 
-def _limpar_prefixo_id(id_prefix: str, texto_bruto: str) -> str:
+def _limpar_inicio_texto(texto: str) -> str:
     """
-    Remove o ID da NC apenas no início da frase, sem apagar textos válidos.
-    Elimina duplicações como:
-        TIP 2025_04 – 04 – ...
-        TIP 2025_06.1 – TIP 06.1 – ...
+    Remove padrões redundantes do início.
+    Ex: 'TIP 01 - Descrição' vira 'Descrição'
+    Ex: '06.1 - Parada' vira 'Parada'
     """
+    if not texto: return ""
+    s = str(texto).strip()
+    
+    # Regex para pegar "SIGLA 00 - " ou "00.0 - "
+    padrao = r'^(?:[A-Z]{3}[\s\-]*)?\d+(?:[._]\d+)?\s*[-:–)]*\s*'
+    
+    texto_limpo = re.sub(padrao, '', s)
+    
+    # PROTEÇÃO CONTRA SUMIÇO: 
+    if not texto_limpo and s:
+        return s
 
-    if not texto_bruto or str(texto_bruto).lower() == 'nan':
-        return "Descrição não disponível."
-
-    desc_str = str(texto_bruto).strip()
-    id_prefix = str(id_prefix).strip()
-
-    if not id_prefix:
-        return desc_str
-
-    # extrai terminal (TIP)
-    terminal_sigla = id_prefix.split(" ")[0]  
-
-    # extrai número base ex: 04, 06.1
-    match = re.search(r"(\d+(?:\.\d+)?)$", id_prefix.replace("_", "."))
-    base_num = match.group(1) if match else ""
-
-    # prefixos possíveis
-    candidatos = [
-        re.escape(id_prefix),                    
-        re.escape(id_prefix.replace("_", ".")),
-        re.escape(terminal_sigla + " " + base_num),
-        re.escape(base_num),
-        re.escape(terminal_sigla)
-    ]
-
-    candidatos = sorted(list(set(candidatos)), key=len, reverse=True)
-
-    # 🔥 CORREÇÃO AQUI
-    # Remove apenas o prefixo e UM delimitador (–, -, :)
-    pattern = re.compile(rf"^({('|'.join(candidatos))})\s*[-–:]?\s*", re.IGNORECASE)
-
-    desc_str = pattern.sub("", desc_str).strip()
-
-    # Corrige capitalização
-    if desc_str and desc_str[0].islower():
-        desc_str = desc_str[0].upper() + desc_str[1:]
-
-    return desc_str
-
-
-# ============================================================
-#               INSERÇÃO DE TEXTO DA NÃO CONFORMIDADE
-# ============================================================
+    if texto_limpo and texto_limpo[0].islower():
+        return texto_limpo[0].upper() + texto_limpo[1:]
+    
+    return texto_limpo
 
 def _inserir_texto_nc(doc: Document, nc_titulo_identificador: str, descricao_bruta: str):
-    descricao_limpa = _limpar_prefixo_id(nc_titulo_identificador, descricao_bruta)
+    """
+    Escreve a NC. Se detectar subitens (linhas começando com número), formata em negrito.
+    """
+    if not descricao_bruta: 
+        descricao_bruta = "Descrição indisponível."
 
-    linhas = [linha for linha in descricao_limpa.split("\n") if linha.strip()]
-    if not linhas:
-        return
+    linhas = [l.strip() for l in descricao_bruta.split("\n") if l.strip()]
+    if not linhas: linhas = ["Descrição indisponível."]
 
+    # --- ITEM PRINCIPAL ---
     paragrafo_nc = doc.add_paragraph()
-
-    # Título
+    
+    # Título (ID)
     run_titulo = paragrafo_nc.add_run(f"Não Conformidade {nc_titulo_identificador}")
     aplicar_estilo_corpo(run_titulo, negrito=True)
     run_titulo.underline = True
 
-    # Travessão único ✔️
+    # Separador
     run_traco = paragrafo_nc.add_run(" – ")
     aplicar_estilo_corpo(run_traco)
 
-    # Primeira linha
-    texto_principal = _limpar_prefixo_id(nc_titulo_identificador, linhas[0])
+    # Texto Limpo
+    texto_principal = _limpar_inicio_texto(linhas[0])
     run_desc = paragrafo_nc.add_run(texto_principal)
     aplicar_estilo_corpo(run_desc)
 
     paragrafo_nc.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
 
-    # Subitens
+    # --- SUBITENS ---
+    # Tenta descobrir o prefixo base (ex: TIP 2025_)
+    base_prefixo = ""
+    match_base = re.match(r"([A-Z]{3}\s\d{4}_)", nc_titulo_identificador)
+    if match_base:
+        base_prefixo = match_base.group(1)
+
     if len(linhas) > 1:
         for sub_item_raw in linhas[1:]:
-            sub_item = _limpar_prefixo_id(nc_titulo_identificador, sub_item_raw)
-
             p_sub = doc.add_paragraph()
             p_sub.paragraph_format.left_indent = Inches(0.5)
             p_sub.paragraph_format.space_after = Pt(2)
             p_sub.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
 
-            partes = sub_item.split(" – ", 1)
-            sub_id = partes[0].strip()
-            sub_desc = partes[1].strip() if len(partes) > 1 else ""
+            # Verifica se a linha começa com número (ex: 06.1 ou TIP 06.1)
+            match_sub = re.match(r'^(?:[A-Z]{3}[\s\-]*)?(\d+[._]\d+)\s*[-:–]?\s*(.*)', sub_item_raw)
 
-            base = nc_titulo_identificador.rsplit("_", 1)[0]
-            sub_id_completo = f"{base}_{sub_id}"
+            if match_sub:
+                # É SUBITEM: Formata com ID em Negrito
+                numero_sub = match_sub.group(1).replace("_", ".") 
+                texto_restante = match_sub.group(2)
+                
+                texto_final = _limpar_inicio_texto(texto_restante)
 
-            run_prefixo = p_sub.add_run(f"Não Conformidade {sub_id_completo}")
-            aplicar_estilo_corpo(run_prefixo, negrito=True)
-            run_prefixo.underline = True
+                id_completo = f"{base_prefixo}{numero_sub}" if base_prefixo else f"Item {numero_sub}"
 
-            run_sep = p_sub.add_run(" – ")
-            aplicar_estilo_corpo(run_sep)
-
-            run_desc = p_sub.add_run(sub_desc)
-            aplicar_estilo_corpo(run_desc)
-
-
-# ============================================================
-#                   INFO DA NC
-# ============================================================
+                run_sub_id = p_sub.add_run(f"Não Conformidade {id_completo}")
+                aplicar_estilo_corpo(run_sub_id, negrito=True)
+                
+                p_sub.add_run(" – ")
+                
+                run_txt = p_sub.add_run(texto_final)
+                aplicar_estilo_corpo(run_txt)
+            else:
+                # É TEXTO CORRIDO: Apenas limpa e exibe
+                texto_limpo = _limpar_inicio_texto(sub_item_raw)
+                run_txt = p_sub.add_run(texto_limpo)
+                aplicar_estilo_corpo(run_txt)
 
 def _inserir_linhas_info(doc: Document, info_socicam: str, constatacao_monit: str, analise_arpe: str):
     for var_name, value in [
@@ -146,22 +123,14 @@ def _inserir_linhas_info(doc: Document, info_socicam: str, constatacao_monit: st
     adicionar_paragrafo_info_compacta(doc, "Constatação: ", str(constatacao_monit))
     adicionar_paragrafo_info_compacta(doc, "Análise da ARPE: ", str(analise_arpe))
 
-
-# ============================================================
-#                 SPLIT SEGURO DE STRINGS
-# ============================================================
-
 def _safe_split(texto: Any) -> List[str]:
     s = str(texto).strip()
-    if not s or s.lower() == "nan":
-        return []
-    s = s.replace(":", ";")
-    return [x.strip() for x in s.split(";") if x.strip()]
-
-
-# ============================================================
-#         GERAÇÃO COMPLETA DA SEÇÃO 3 DO RELATÓRIO
-# ============================================================
+    if not s or s.lower() == "nan": return []
+    
+    # Regex inteligente: separa por ; | Enter | : (se não for horário)
+    partes = re.split(r'[;\n]|:(?!\d)', s)
+    
+    return [x.strip() for x in partes if x.strip()]
 
 def gerar_secao_nao_conformidades_constatadas(
     doc: Document,
@@ -174,12 +143,26 @@ def gerar_secao_nao_conformidades_constatadas(
     proc_user: str,
     monit_user: str
 ):
-
     id_fiscalizacao = row["ID da Fiscalização"]
     processo_ctr = processo_info.get("Processo CTR Nº", "XX/XXXX")
+    
+    # --- AJUSTE AQUI: Lógica para separar e formatar as Cartas ---
     cartas_raw = str(processo_info.get("Carta SAP/PER/ARPE Nº", "")).strip()
-
-    texto_cartas = f"constante da Carta SAP/PER/ARPE N° {cartas_raw}, " if cartas_raw else ""
+    texto_cartas = ""
+    
+    if cartas_raw and cartas_raw.lower() != "nan":
+        # Divide por ponto e vírgula
+        partes_cartas = [p.strip() for p in cartas_raw.split(";") if p.strip()]
+        
+        if partes_cartas:
+            # Formata cada parte adicionando o prefixo
+            cartas_formatadas = [f"Carta SAP/PER/ARPE N° {p}" for p in partes_cartas]
+            
+            # Junta com " e "
+            juncao_cartas = " e ".join(cartas_formatadas)
+            
+            # Monta o texto final
+            texto_cartas = f"constante da {juncao_cartas}, "
 
     adicionar_titulo_secao(doc, "3. RESULTADO DAS VISTORIAS DAS NÃO CONFORMIDADES PENDENTES")
 
@@ -193,30 +176,32 @@ def gerar_secao_nao_conformidades_constatadas(
         ),
     )
 
-    grupo = nao_conformidades_df[
-        nao_conformidades_df["ID da Fiscalização"] == id_fiscalizacao
-    ].copy()
+    grupo = nao_conformidades_df[nao_conformidades_df["ID da Fiscalização"] == id_fiscalizacao].copy()
 
+    # Ordena terminais
+    grupos_ordenados = sorted(grupo.groupby("Terminal"), key=lambda x: str(x[0]))
+    
     num_terminal = 1
-    for terminal, dados_terminal in grupo.groupby("Terminal"):
-
+    for terminal, dados_terminal in grupos_ordenados:
         p = doc.add_paragraph()
-        run = p.add_run(f"3.{num_terminal} - {terminal.upper()}")
+        run = p.add_run(f"3.{num_terminal} - {str(terminal).upper()}")
         aplicar_estilo_titulo(run)
         p.paragraph_format.space_before = Pt(12)
 
         ncs_processadas = set()
 
         for _, nc in dados_terminal.iterrows():
-
+            # Lógica original de busca
             raw_key = str(nc.get("Legenda da Foto", "")).strip()
             if not raw_key or raw_key.lower() == "nan":
                 raw_key = str(nc.get("Constatação", "")).strip()
 
+            # AQUI: Usa o split inteligente para pegar TIP 01, TIP 02...
             constatacoes = _safe_split(raw_key)
             infos = _safe_split(nc.get("Informação SOCICAM", ""))
             analises = _safe_split(nc.get("Análise da Arpe", ""))
 
+            # Nivela o tamanho das listas
             max_len = max(len(constatacoes), len(infos), len(analises))
             constatacoes += [""] * (max_len - len(constatacoes))
             infos += ["N/A"] * (max_len - len(infos))
@@ -224,23 +209,18 @@ def gerar_secao_nao_conformidades_constatadas(
 
             for i in range(max_len):
                 const = constatacoes[i]
-                if not const:
-                    continue
+                if not const: continue
 
+                # Busca dados na base
                 dados = encontrar_dados_na_base(
-                    const,
-                    df_base_nc,
-                    ano_user,
-                    proc_user,
-                    monit_user,
-                    terminal_user=str(terminal)
+                    const, df_base_nc, ano_user, proc_user, monit_user, terminal_user=str(terminal)
                 )
 
                 if dados["id"] != "ID_NAO_ENCONTRADO":
-                    if dados["id"] in ncs_processadas:
-                        continue
+                    if dados["id"] in ncs_processadas: continue
                     ncs_processadas.add(dados["id"])
 
+                # Chama a função de inserção corrigida
                 _inserir_texto_nc(doc, dados["id"], dados["descricao"])
                 _inserir_linhas_info(doc, infos[i], const, analises[i])
                 doc.add_paragraph().paragraph_format.space_after = Pt(12)

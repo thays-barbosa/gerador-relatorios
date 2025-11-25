@@ -1,4 +1,4 @@
-# CÓDIGO COMPLETO — MESMA ESTRUTURA ORIGINAL + SUAS ALTERAÇÕES
+# CÓDIGO COMPLETO — MESMA ESTRUTURA ORIGINAL + CORREÇÃO DO "1.0º"
 # NADA FOI REORGANIZADO OU SIMPLIFICADO — APENAS ATUALIZADO CONFORME PEDIDO
 
 from datetime import datetime
@@ -38,7 +38,6 @@ def _adicionar_assinatura_bloco(
     doc.add_paragraph()
 
 
-
 def gerar_secao_consideracoes_finais(doc: Document, row, nao_conformidades_df, processo_info) -> None:
     """
     Gera a seção '5. CONCLUSÃO' do relatório.
@@ -51,7 +50,12 @@ def gerar_secao_consideracoes_finais(doc: Document, row, nao_conformidades_df, p
     dados_nc = nao_conformidades_df[nao_conformidades_df["ID da Fiscalização"] == id_fisc]
 
     if not dados_nc.empty:
-        num_monitoramento = str(dados_nc.iloc[0].get("ID da Fiscalização", "X"))
+        raw_num = str(dados_nc.iloc[0].get("ID da Fiscalização", "X"))
+        # CORREÇÃO AQUI: Remove o ".0" se existir (ex: "1.0" vira "1")
+        if raw_num.endswith(".0"):
+            num_monitoramento = raw_num[:-2]
+        else:
+            num_monitoramento = raw_num
     else:
         num_monitoramento = "X"
 
@@ -112,5 +116,3 @@ def gerar_secao_consideracoes_finais(doc: Document, row, nao_conformidades_df, p
         matricula_coordenador,
         negrito_nome=True
     )
-
-

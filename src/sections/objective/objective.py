@@ -20,9 +20,11 @@ def gerar_secao_objetivo(doc: Document, row: Dict[str, Any], processo_info: Dict
     ctr_original = processo_info.get("Processo CTR Nº", "xx/xxxx")
     
     # {doc_sei}: Doc. SEI Nº
-    # MODIFICAÇÃO: Usando a chave correta 'Doc. SEI Nº' da aba Processos
-    doc_sei = processo_info.get("Doc. SEI Nº", "xxxxxxx")
-
+    # CORREÇÃO AQUI: Remove o ".0" que o Excel/Pandas adiciona automaticamente
+    raw_doc_sei = processo_info.get("Doc. SEI Nº", "xxxxxxx")
+    doc_sei = str(raw_doc_sei).strip()
+    if doc_sei.endswith(".0"):
+        doc_sei = doc_sei[:-2]
 
     # --- 2. Extração e Formatação de {cidades_str} ---
     
