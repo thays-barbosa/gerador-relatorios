@@ -130,6 +130,8 @@ def gerar_secao_resumo_nao_conformidades(
                 if not txt_busca: continue
                 
                 info_socicam_texto = infos[i]
+                
+                # AQUI ELE CHAMA A FUNÇÃO CORRIGIDA NO UTILS.PY
                 dados_base = encontrar_dados_na_base(
                     txt_busca, df_base_nc, ano_user, proc_user, monit_user, terminal_user=str(terminal_bruto)
                 )
@@ -171,7 +173,8 @@ def gerar_secao_resumo_nao_conformidades(
          
             desc_limpa = _limpar_redundancia_tabela(item['desc'])
             
-            r_desc = p_nc.add_run(f" – {desc_limpa}") 
+            # --- AJUSTE AQUI: Trocado '–' (travessão) por ' - ' (hífen) ---
+            r_desc = p_nc.add_run(f" - {desc_limpa}") 
             _aplicar_estilo_resumo(r_desc)
             
             row_cells[2].text = item["socicam"]

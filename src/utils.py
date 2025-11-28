@@ -48,6 +48,7 @@ STOPWORDS = {
     "por", "para", "com", "sem", "que", "se", "e", "ou", "ao", "aos",
     "terminal", "rodoviario", "intermunicipal", "passageiros", "lugar", "local",
     "item", "nc", "nao", "conformidade", "ver", "foto", "fotos", "vide", "imagem",
+    "situacao", "detalhe", "vista", "registro", # Adicionei palavras comuns de legenda
     # Ignora nomes de cidade na comparação de TEXTO
     "recife", "tip", "caruaru", "garanhuns", "arcoverde", "petrolina", "serra", "talhada",
     "cidade", "estado", "parte", "lado", "parede", "fachada" 
@@ -251,8 +252,8 @@ def encontrar_dados_na_base(
             melhor_score = score_final
             melhor_row = row
 
-    # AJUSTE CHAVE FINAL: Threshold final para aceitar o match (mínimo 30% - Máxima Tolerância)
-    if melhor_row is not None and melhor_score >= 0.30:
+    # AJUSTE CHAVE FINAL: Threshold aumentado para 50% para evitar "falsos positivos"
+    if melhor_row is not None and melhor_score >= 0.50:
         
         evidencia_chave = str(melhor_row.get("Evidencia_Agregada", "")).strip()
         item_raw = str(melhor_row.get("Item", "")).strip()

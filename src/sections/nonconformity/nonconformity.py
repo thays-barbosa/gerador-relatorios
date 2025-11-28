@@ -52,7 +52,8 @@ def _inserir_texto_nc(doc: Document, nc_titulo_identificador: str, descricao_bru
     aplicar_estilo_corpo(run_titulo, negrito=True)
     run_titulo.underline = True
 
-    run_traco = paragrafo_nc.add_run("  ")
+    # --- AJUSTE ANTERIOR: Hífen adicionado ---
+    run_traco = paragrafo_nc.add_run(" - ")
     aplicar_estilo_corpo(run_traco)
 
     texto_principal = _limpar_inicio_texto(linhas[0])
@@ -87,7 +88,8 @@ def _inserir_texto_nc(doc: Document, nc_titulo_identificador: str, descricao_bru
                 run_sub_id = p_sub.add_run(f"Não Conformidade {id_completo}")
                 aplicar_estilo_corpo(run_sub_id, negrito=True)
                 
-                p_sub.add_run("  ")
+                # --- AJUSTE ANTERIOR: Hífen adicionado ---
+                p_sub.add_run(" - ")
                 
                 run_txt = p_sub.add_run(texto_final)
                 aplicar_estilo_corpo(run_txt)
@@ -199,6 +201,12 @@ def gerar_secao_nao_conformidades_constatadas(
                 )
 
                 if dados["id"] != "ID_NAO_ENCONTRADO":
+                    # --- NOVO BLOQUEIO DE SEGURANÇA ---
+                    # Impede que a NC específica do TIP apareça caso seja selecionada erroneamente
+                    if "TIP 2025_03" in str(dados["id"]):
+                        continue
+                    # ----------------------------------
+
                     if dados["id"] in ncs_processadas: continue
                     ncs_processadas.add(dados["id"])
 
