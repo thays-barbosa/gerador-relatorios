@@ -22,6 +22,25 @@ ALTURA_IMAGEM_LADO_A_LADO = Inches(2.7)
 _COR_CINZA_SOMBRA_HEX = "BFBFBF"
 _COR_PRETO_RGB = (0, 0, 0)
 
+# --- Mapeamento de Terminais para Busca Dinâmica ---
+TERMINAIS_MAP = {
+    # Chave (Input do Usuário) : Valor (Sigla na Base/ID)
+    "RECIFE": "TIP",
+    "TIP": "TIP",
+    "CARUARU": "CAR",
+    "CAR": "CAR",
+    "GARANHUNS": "GAR",
+    "GAR": "GAR",
+    "ARCOVERDE": "ARC",
+    "ARC": "ARC",
+    "PETROLINA": "PET",
+    "PET": "PET",
+    "SERRA": "SER",
+    "ST": "SER",
+    "SERRA TALHADA": "SER", 
+    # Adicione novos terminais aqui
+}
+
 # --- STOPWORDS (Palavras ignoradas na busca) ---
 STOPWORDS = {
     "o", "a", "os", "as", "um", "uns", "uma", "umas",
@@ -29,8 +48,9 @@ STOPWORDS = {
     "por", "para", "com", "sem", "que", "se", "e", "ou", "ao", "aos",
     "terminal", "rodoviario", "intermunicipal", "passageiros", "lugar", "local",
     "item", "nc", "nao", "conformidade", "ver", "foto", "fotos", "vide", "imagem",
-    # Ignora nomes de cidade na comparação de TEXTO (o filtro de terminal já cuida disso)
-    "recife", "tip", "caruaru", "garanhuns", "arcoverde", "petrolina", "serra", "talhada"
+    # Ignora nomes de cidade na comparação de TEXTO
+    "recife", "tip", "caruaru", "garanhuns", "arcoverde", "petrolina", "serra", "talhada",
+    "cidade", "estado", "parte", "lado", "parede", "fachada" 
 }
 
 def carregar_base_nc(caminho_base: str) -> pd.DataFrame:
@@ -58,7 +78,6 @@ def _remover_acentos(texto: str) -> str:
 def _singularizar(palavra: str) -> str:
     """
     Remove apenas o 's' final para lidar com plurais simples.
-    Não remove vogais para evitar confundir palavras (ex: Muro x Mura).
     """
     p = palavra.lower()
     if p.endswith('s') and len(p) > 3: 
@@ -107,6 +126,7 @@ def _limpar_processo_para_match(processo: str) -> str:
 def _ajustar_numero_nc(ano: str, processo: str, monit: str, item: str, prefixo_terminal: str) -> str:
     if not item:
         return "ID_NAO_ENCONTRADO"
+    # Lógica para garantir que o prefixo do terminal (ex: CAR) e o ano estejam na frente
     item_limpo = str(item).strip().replace('.', '_', 1).replace('.', '').replace('_', '.', 1).strip()
     item_sem_prefixo = re.sub(r'([A-Z]{3}\s)?(\d{4}_)?', '', item_limpo).strip()
     return f"{prefixo_terminal} {ano}_{item_sem_prefixo}"
@@ -137,7 +157,7 @@ def encontrar_dados_na_base(
 
     df_filt = df_base.copy()
 
-    # --- FILTROS (Ano, Processo, Doc) ---
+    # --- FILTROS DE CONTEXTO (Ano, Processo, Doc) ---
     if "Ano" in df_filt.columns and ano_user and str(ano_user).isdigit():
         df_filt = df_filt[df_filt["Ano"].astype(str).str.strip() == str(ano_user)]
 
@@ -148,50 +168,59 @@ def encontrar_dados_na_base(
         df_filt = df_filt.drop(columns=['PROCESSO_LIMPO'])
 
     if "TIPO_DOC" in df_filt.columns and monit_user:
-        mask_monit = df_filt["TIPO_DOC"].str.upper().str.contains("MONIT", na=False)
-        mask_num = df_filt["TIPO_DOC"].str.contains(str(monit_user), na=False)
+        mask_monit = df_filt["TIPO_DOC"].astype(str).str.upper().str.contains("MONIT", na=False)
+        mask_num = df_filt["TIPO_DOC"].astype(str).str.contains(str(monit_user), na=False)
         df_filt = df_filt[mask_monit & mask_num]
-
-    # --- FILTRO DE TERMINAL (ROBUSTO) ---
+        
+    # --- FILTRO DE TERMINAL (REFORÇADO) ---
     prefixo_terminal = ""
-    if terminal_user and "Localização/VIA" in df_filt.columns:
-        t_user_upper = str(terminal_user).upper()
+    
+    if terminal_user:
+        t_user_upper = _limpar_texto_simples(terminal_user).upper()
         sigla = ""
         
-        # Define sigla baseada no input do usuário
-        if "RECIFE" in t_user_upper or "TIP" in t_user_upper:
-            sigla = "TIP"
-            prefixo_terminal = "TIP"
-        elif "CARUARU" in t_user_upper or "CAR" in t_user_upper:
-            sigla = "CAR"
-            prefixo_terminal = "CAR"
-        elif "GARANHUNS" in t_user_upper or "GAR" in t_user_upper:
-            sigla = "GAR"
-            prefixo_terminal = "GAR"
-        elif "ARCOVERDE" in t_user_upper or "ARC" in t_user_upper:
-            sigla = "ARC"
-            prefixo_terminal = "ARC"
-        elif "PETROLINA" in t_user_upper or "PET" in t_user_upper:
-            sigla = "PET"
-            prefixo_terminal = "PET"
-        elif "SERRA" in t_user_upper or "ST" in t_user_upper:
-            sigla = "SER"
-            prefixo_terminal = "SER"
-
+        # 1. Identifica a sigla do terminal:
+        for key, value in TERMINAIS_MAP.items():
+            if key in t_user_upper:
+                sigla = value
+                prefixo_terminal = value
+                break
+        
         if sigla:
-            # Busca onde tem a SIGLA (ex: GAR) OU o nome da cidade
-            # Isso evita que o filtro falhe se a base tiver "Terminal Garanhuns" sem "GAR"
-            term_col = df_filt["Localização/VIA"].str.upper()
-            mask_sigla = term_col.str.contains(sigla, na=False)
+            # 2. **REFORÇO CRÍTICO**: Filtra a base pela SIGLA no campo "Item" OU "ID da Fiscalização"
+            colunas_possiveis = [c for c in ["Item", "ID da Fiscalização"] if c in df_filt.columns]
             
-            nome_cidade = t_user_upper.replace("TERMINAL", "").replace("DE", "").strip().split()[0]
-            if len(nome_cidade) > 3:
-                mask_nome = term_col.str.contains(nome_cidade, na=False)
-                df_filt = df_filt[mask_sigla | mask_nome]
-            else:
-                df_filt = df_filt[mask_sigla]
+            if colunas_possiveis:
+                # Cria uma máscara que verifica se a sigla (ex: CAR) está no início
+                # de qualquer uma das colunas identificadoras
+                mask_sigla_item = df_filt[colunas_possiveis[0]].astype(str).str.upper().str.startswith(sigla, na=False)
+                
+                if len(colunas_possiveis) > 1:
+                    for col_nome in colunas_possiveis[1:]:
+                        mask_sigla_item = mask_sigla_item | df_filt[col_nome].astype(str).str.upper().str.startswith(sigla, na=False)
+                
+                df_filt = df_filt[mask_sigla_item]
+                
+            # 3. Adiciona o filtro de Localização/VIA (se disponível) como filtro secundário
+            if "Localização/VIA" in df_filt.columns:
+                term_col = df_filt["Localização/VIA"].astype(str).str.upper()
+                nome_cidade_busca = ""
+                for key, value in TERMINAIS_MAP.items():
+                    if value == sigla and len(key) > 3: 
+                         nome_cidade_busca = key
+                         break
+                
+                mask_sigla_loc = term_col.str.contains(sigla, na=False)
+                if nome_cidade_busca:
+                    mask_nome_loc = term_col.str.contains(nome_cidade_busca, na=False)
+                    df_filt = df_filt[mask_sigla_loc | mask_nome_loc]
+                else:
+                    df_filt = df_filt[mask_sigla_loc]
 
-    if df_filt.empty: return resultado
+
+    if df_filt.empty: 
+        print(f"Alerta: Base vazia após filtro de Terminal {terminal_user}.")
+        return resultado
 
     melhor_score = 0
     melhor_row = None
@@ -201,35 +230,29 @@ def encontrar_dados_na_base(
     for _, row in df_filt.iterrows():
         txt_base_raw = " ".join([str(row.get(c, "")) for c in cols_busca])
         
-        # A. Keyword Match (Poderoso)
+        # A. Keyword Match (Pontuação de Palavras-Chave)
         tokens_base = _extrair_palavras_chave(txt_base_raw)
-        
         if len(tokens_busca) > 0:
             interseccao = tokens_busca.intersection(tokens_base)
             score_keywords = len(interseccao) / len(tokens_busca)
         else:
             score_keywords = 0
         
-        # B. Sequence Match (Desempate)
+        # B. Sequence Match (Similaridade de Texto)
         txt_base_seq = _limpar_texto_simples(txt_base_raw)
         score_seq = SequenceMatcher(None, texto_busca_seq, txt_base_seq).ratio()
         
-        # Lógica de Pontuação:
-        # Se 40% das palavras baterem (ex: 2 de 5), já consideramos um candidato forte.
-        # Damos preferência ao score de keywords, usando seq como fallback.
-        if score_keywords >= 0.40:
-            # Boost no score se tiver keywords fortes
-            score_final = max(score_keywords, 0.80) 
-        else:
-            score_final = score_seq
+        # *** DEFINIÇÃO DE SCORE FINAL (O MAIOR ENTRE OS DOIS) ***
+        # Usa o score mais alto entre a similaridade de sequência e a contagem de palavras-chave.
+        score_final = max(score_keywords, score_seq) 
+        # **********************************
             
         if score_final > melhor_score:
             melhor_score = score_final
             melhor_row = row
 
-    # Threshold de 0.40 (40%) pega casos difíceis como "Muro externo" vs "Muro lateral"
-    # pois "Muro" e "Pintura" batem (2 palavras de 4 = 50% match).
-    if melhor_row is not None and melhor_score >= 0.40:
+    # AJUSTE CHAVE FINAL: Threshold final para aceitar o match (mínimo 30% - Máxima Tolerância)
+    if melhor_row is not None and melhor_score >= 0.30:
         
         evidencia_chave = str(melhor_row.get("Evidencia_Agregada", "")).strip()
         item_raw = str(melhor_row.get("Item", "")).strip()
@@ -237,6 +260,7 @@ def encontrar_dados_na_base(
 
         id_final_formatado = _ajustar_numero_nc(ano_user, proc_user, monit_user, base_id, prefixo_terminal)
 
+        # Filtra o grupo de NCs para o relatório (ex: 7, 7.1, 7.2)
         df_grupo = df_filt[df_filt["Item"].astype(str).str.strip().str.startswith(base_id)].sort_values(by="Item")
 
         linhas_texto = []
@@ -246,8 +270,9 @@ def encontrar_dados_na_base(
         for _, row_g in df_grupo.iterrows():
             item_n = str(row_g.get("Item", "")).strip()
             desag = str(row_g.get("Evidencia_Desagregada", "")).strip()
+            # Adiciona o item desagregado, se diferente do agregado principal
             if desag and desag.lower() != 'nan' and desag != evidencia_chave:
-                linhas_texto.append(f"{item_n}  {desag}")
+                linhas_texto.append(f"{item_n} - {desag}")
         
         if not linhas_texto:
             desc_final = texto_busca
@@ -264,7 +289,8 @@ def encontrar_dados_na_base(
 
     return resultado
 
-# --- (O RESTANTE DAS FUNÇÕES DE FORMATAÇÃO PERMANECE IGUAL) ---
+# --- FUNÇÕES DE FORMATAÇÃO E AUXILIARES (AS SEGUINTES FUNÇÕES NÃO FORAM ALTERADAS) ---
+
 def _set_run_language(run, lang_code: str = "pt-BR") -> None:
     rPr = run._element.get_or_add_rPr()
     lang = OxmlElement("w:lang")
@@ -510,7 +536,7 @@ def set_cell_border(cell, **kwargs) -> None:
             if old_border is not None:
                 tblBorders.remove(old_border)
             tblBorders.append(border_element)
-
+            
 def adicionar_legenda_formatada_na_celula(cell, texto: str) -> None:
     if not cell.paragraphs:
         cell.add_paragraph()
