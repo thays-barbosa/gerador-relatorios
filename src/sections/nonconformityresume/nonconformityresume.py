@@ -30,37 +30,23 @@ def _formatar_nome_terminal(nome_bruto: str) -> str:
     return str(nome_bruto).upper().replace("TERMINAL DE ", "").replace("TERMINAL DO ", "").strip()
 
 def _safe_split_resumo(texto: Any) -> List[str]:
-    """
-    Divide por ';' ou Enter ou ':' (protegendo horários como 10:30).
-    """
     s = str(texto).strip()
     if not s or s.lower() == 'nan': return []
-
     partes = re.split(r'[;\n]|:(?!\d)', s)
-    
     return [x.strip() for x in partes if x.strip()]
 
 def _limpar_redundancia_tabela(texto: str) -> str:
-    """Remove 'TIP 01', 'CAR 05' etc. do início."""
     if not texto: return ""
     padrao = r'^([A-Z]{3}\s+)?\d+([._]\d+)?\s*[-:–]?\s*'
     limpo = re.sub(padrao, '', str(texto).strip())
-    
     if not limpo and texto: return str(texto)
-
     if limpo and limpo[0].islower():
         return limpo[0].upper() + limpo[1:]
     return limpo
 
 def gerar_secao_resumo_nao_conformidades(
-    doc: Document,
-    row: pd.Series,
-    nao_conformidades_df: pd.DataFrame,
-    processo_info: Dict[str, str],
-    df_base_nc: pd.DataFrame,
-    ano_user: str,
-    proc_user: str,
-    monit_user: str
+    doc: Document, row: pd.Series, nao_conformidades_df: pd.DataFrame,
+    processo_info: Dict[str, str], df_base_nc: pd.DataFrame, ano_user: str, proc_user: str, monit_user: str
 ):
     id_fisc = row["ID da Fiscalização"]
     processo_ctr = processo_info.get("Processo CTR Nº", "XX/XXXX")
@@ -82,11 +68,9 @@ def gerar_secao_resumo_nao_conformidades(
     tabela.alignment = WD_TABLE_ALIGNMENT.CENTER
     
     headers = [
-        "TERMINAL",
-        f"NÃO CONFORMIDADE\nRELATÓRIO ARPE/CTR\n{processo_ctr}",
+        "TERMINAL", f"NÃO CONFORMIDADE\nRELATÓRIO ARPE/CTR\n{processo_ctr}",
         f"INFORMAÇÃO SOCICAM\nCarta SAP/PER/ARPE\n{carta_limpa}",
-        f"VISTORIA DA ARPE\n{periodo_vistoria}",
-        "SITUAÇÃO"
+        f"VISTORIA DA ARPE\n{periodo_vistoria}", "SITUAÇÃO"
     ]
     col_widths = [Inches(1.0), Inches(2.2), Inches(1.9), Inches(1.5), Inches(0.8)]
     
@@ -109,71 +93,66 @@ def gerar_secao_resumo_nao_conformidades(
         ids_adicionados = set()
 
         for _, linha in grupo.iterrows():
-            raw_const = str(linha.get("Legenda da Foto", "")).strip()
-            if not raw_const or raw_const.lower() == "nan":
-                 raw_const = str(linha.get("Constatação", "")).strip()
+            raw_legenda = str(linha.get("Legenda da Foto", "")).strip()
+            
+            # Recupera as listas de texto para exibição
+            raw_info_soc = str(linha.get("Informação SOCICAM carta", "")).strip()
+            if not raw_info_soc or raw_info_soc.lower() == 'nan': 
+                raw_info_soc = str(linha.get("Informação SOCICAM", "")).strip()
 
-            constatacoes = _safe_split_resumo(raw_const)
-            
-            raw_info = str(linha.get("Informação SOCICAM carta", "")).strip()
-            if not raw_info or raw_info.lower() == 'nan':
-                raw_info = str(linha.get("Informação SOCICAM", "")).strip()
-            
-            infos = _safe_split_resumo(raw_info)
-            
-            max_len = max(len(constatacoes), len(infos))
-            if len(constatacoes) < max_len: constatacoes.extend([""] * (max_len - len(constatacoes)))
-            if len(infos) < max_len: infos.extend(["N/A"] * (max_len - len(infos)))
+            # fallback para busca se legenda não existir
+            raw_const_busca = str(linha.get("Constatação", "")).strip()
 
-            for i in range(max_len):
-                txt_busca = constatacoes[i]
+            list_legenda = _safe_split_resumo(raw_legenda)
+            list_socicam = _safe_split_resumo(raw_info_soc)
+            
+            # Define Search Keys
+            if list_legenda:
+                search_keys = list_legenda
+            else:
+                search_keys = _safe_split_resumo(raw_const_busca)
+            
+            
+            idx_exibicao = 0
+            
+            for txt_busca in search_keys:
                 if not txt_busca: continue
                 
-                info_socicam_texto = infos[i]
+                dados_base = encontrar_dados_na_base(txt_busca, df_base_nc, ano_user, proc_user, monit_user, terminal_user=str(terminal_bruto))
                 
-                # AQUI ELE CHAMA A FUNÇÃO CORRIGIDA NO UTILS.PY
-                dados_base = encontrar_dados_na_base(
-                    txt_busca, df_base_nc, ano_user, proc_user, monit_user, terminal_user=str(terminal_bruto)
-                )
-                
-                if dados_base["id"] in ids_adicionados and dados_base["id"] != "ID_NAO_ENCONTRADO":
+                if "NAO_ENCONTRADO" in str(dados_base["id"]):
                     continue
                 
-                if dados_base["id"] != "ID_NAO_ENCONTRADO":
-                    ids_adicionados.add(dados_base["id"])
+                if dados_base["id"] in ids_adicionados: continue
+                ids_adicionados.add(dados_base["id"])
                 
+                txt_exibir_socicam = list_socicam[idx_exibicao] if idx_exibicao < len(list_socicam) else "N/A"
+                idx_exibicao += 1
+
                 lista_dados.append({
-                    "id": dados_base["id"],
-                    "desc": dados_base["descricao"],
-                    "socicam": info_socicam_texto,
+                    "id": dados_base["id"], "desc": dados_base["descricao"],
+                    "socicam": txt_exibir_socicam,
                     "data": dados_base["data_vistoria"],
                     "situacao": dados_base["situacao"]
                 })
 
         lista_dados.sort(key=lambda x: x["id"])
-
         if not lista_dados: continue
 
         for idx, item in enumerate(lista_dados):
             row_cells = tabela.add_row().cells
-            
             if idx == 0:
                 primeira_celula_terminal = row_cells[0]
                 row_cells[0].text = nome_terminal
                 row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 row_cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                if row_cells[0].paragraphs[0].runs:
-                    _aplicar_estilo_resumo(row_cells[0].paragraphs[0].runs[0], negrito=True)
+                if row_cells[0].paragraphs[0].runs: _aplicar_estilo_resumo(row_cells[0].paragraphs[0].runs[0], negrito=True)
             
             p_nc = row_cells[1].paragraphs[0]
             aplicar_estilo_paragrafo_compacto(p_nc)
-            
             r_id = p_nc.add_run(f"{item['id']}")
             _aplicar_estilo_resumo(r_id, negrito=True)
-         
             desc_limpa = _limpar_redundancia_tabela(item['desc'])
-            
-            # --- AJUSTE AQUI: Trocado '–' (travessão) por ' - ' (hífen) ---
             r_desc = p_nc.add_run(f" - {desc_limpa}") 
             _aplicar_estilo_resumo(r_desc)
             
@@ -190,10 +169,8 @@ def gerar_secao_resumo_nao_conformidades(
             row_cells[4].text = s
             row_cells[4].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             row_cells[4].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            
             is_critico = s in ["PENDENTE", "NÃO CONFORME", "NAO CONFORME", "NO PRAZO"]
-            if row_cells[4].paragraphs[0].runs:
-                _aplicar_estilo_resumo(row_cells[4].paragraphs[0].runs[0], negrito=is_critico)
+            if row_cells[4].paragraphs[0].runs: _aplicar_estilo_resumo(row_cells[4].paragraphs[0].runs[0], negrito=is_critico)
 
             current_row_index += 1
 

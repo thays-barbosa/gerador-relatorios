@@ -149,8 +149,7 @@ def gerar_secao_anexo_fotos(
     terminal_anterior = None
 
     for terminal, grupo_terminal in nc_fisc.groupby("Terminal"):
-        
-        # --- CORREÇÃO: Conjunto para evitar IDs duplicados no mesmo terminal ---
+
         ids_processados_no_terminal = set() 
 
         for _, linha in grupo_terminal.iterrows():
@@ -176,8 +175,6 @@ def gerar_secao_anexo_fotos(
                 
                 if not texto_id: continue
 
-                # --- LIMPEZA DE BUSCA (IGUAL AO NONCONFORMITY.PY) ---
-                # Pega só o texto antes dos dois pontos para buscar o ID correto
                 texto_para_busca = texto_id.split(':')[0].strip()
 
                 # Busca ID na Base
@@ -195,8 +192,6 @@ def gerar_secao_anexo_fotos(
 
                 if id_encontrado in ["ID_NAO_ENCONTRADO", "ID_ERRO"]:
                     continue
-
-                # --- CORREÇÃO: Verifica se já processamos esse ID neste terminal ---
                 if id_encontrado in ids_processados_no_terminal:
                     continue
                 
