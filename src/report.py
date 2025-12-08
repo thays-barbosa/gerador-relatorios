@@ -8,15 +8,17 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 import sys
 import os
 from sections.introduction.introduction import gerar_secao_introducao
-from sections.legalbasis.legalbasis import gerar_secao_fundamentacao_legal
-from sections.nonconformity.nonconformity import (
-    gerar_secao_nao_conformidades_constatadas,
+from sections.objective.objective import gerar_secao_objetivo
+from sections.recommendations.recommendations import gerar_secao_recomendacoes
+from sections.methodology.methodology import gerar_secao_metodologia
+from sections.conclusions.conclusions import (
+    gerar_secao_conclusoes,
 )
-from sections.nonconformityresume.nonconformityresume import (
-    gerar_secao_resumo_nao_conformidades,
+from sections.inspection.inspection import (
+    gerar_secao_fiscalizacao,
 )
-from sections.finalconsiderations.finalconsiderations import (
-    gerar_secao_consideracoes_finais,
+from sections.finalprovisions.finalprovisions import (
+    gerar_secao_determinacoes_finais,
 )
 from utils import (
     adicionar_texto_centralizado,
@@ -75,7 +77,7 @@ def gerar_relatorio():
         id_fisc = row["ID da Fiscalização"]
         doc = Document()
 
-        doc.add_picture(os.path.join(BASE_DIR, "assets/logo_arpe.jpeg"), width=Inches(2))
+        doc.add_picture(os.path.join(BASE_DIR, "assets/logo_arpe.jpg"), width=Inches(2))
         logo_arpe = doc.paragraphs[-1]
         logo_arpe.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         adicionar_texto_centralizado(doc, "DIRETORIA DE REGULAÇÃO TÉCNICO-OPERACIONAL")
@@ -92,13 +94,16 @@ def gerar_relatorio():
 
         doc.add_section(WD_SECTION.NEW_PAGE)
 
-        gerar_secao_introducao(doc, row)
-        gerar_secao_fundamentacao_legal(doc)
-        gerar_secao_nao_conformidades_constatadas(
+        gerar_secao_introducao(doc)
+        gerar_secao_objetivo(doc)
+        gerar_secao_metodologia(doc, row)
+        gerar_secao_fiscalizacao(doc, row, nao_conformidades_df)
+        gerar_secao_determinacoes_finais(doc, row)
+        gerar_secao_recomendacoes(doc,row)
+        gerar_secao_conclusoes(
             doc, row, nao_conformidades_df, FOTOS_DIR, observacoes_df, recomendacoes_df
         )
-        gerar_secao_resumo_nao_conformidades(doc, row, nao_conformidades_df)
-        gerar_secao_consideracoes_finais(doc, row)
+       
 
         nome_arquivo = f"relatorio_{id_fisc}"
         caminho_docx = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.docx")
