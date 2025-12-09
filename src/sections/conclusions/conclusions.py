@@ -8,7 +8,9 @@ from utils import (
     aplicar_borda_paragrafo,
     adicionar_legenda_formatada,
     processar_imagem_para_relatorio,
+    adicionar_texto_centralizado,
 )
+from datetime import datetime
 
 
 def gerar_secao_conclusoes(
@@ -21,10 +23,13 @@ def gerar_secao_conclusoes(
 
     adicionar_titulo_secao(doc, "7. CONCLUSÕES")
 
-    adicionar_paragrafo_justificado(
-        doc,
-        "A seguir, apresentam-se as não conformidades registradas nos diversos terminais fiscalizados:",
-    )
+    texto1 = "Tendo em vista as ações de fiscalização realizadas pela Arpe foram constatadas mais nove Não Conformidades distribuídas nos Terminais Rodoviários das cidades de Garanhuns (2), Petrolina (2), Caruaru (2) e do Recife-TIP (3), que devem ser solucionadas pela SOCICAM de acordo com as Determinações desta Agência de Regulação (v. Quadro 1). Cabe reforçar a recomendação de levantamento diagnóstico das cobertas dos Terminais Rodoviários,com o envio à Arpe dos respectivos laudos técnicos. "
+
+    texto2 = "Por fim, solicita-se o encaminhamento deste Processo de Fiscalização para conhecimento e acompanhamento da EPTI, na qualidade de Poder Concedente do Contrato de Concessão e gestora do Sistema de Transporte Coletivo Intermunicipal de Passageiros (STCIP-PE). "
+
+    adicionar_paragrafo_justificado(doc, texto1)
+    adicionar_paragrafo_justificado(doc, texto2)
+
 
     id_fisc = row["ID da Fiscalização"]
     nc_fisc = nao_conformidades_df[
@@ -188,3 +193,24 @@ def gerar_secao_conclusoes(
                     num_rec += 1
 
         num_terminal += 1
+
+        # Pega a data atual no formato dd/mm/aaaa
+        data_atual = datetime.now().strftime("%d/%m/%Y")
+        adicionar_texto_centralizado(doc, f"\n\nRecife, {data_atual}.")
+        adicionar_texto_centralizado(doc, "\n\n")
+
+        # Assinaturas dos responsáveis (pode ser uma string separada por ";" ou ",")
+        assinantes = str(row.get("Assinatura", "")).split(";")
+        for assinante in assinantes:
+            nome = assinante.strip()
+            if nome:
+                adicionar_texto_centralizado(doc, "_______________________")
+                adicionar_texto_centralizado(doc, nome)
+                adicionar_texto_centralizado(doc, "Analista de Regulação")
+                adicionar_texto_centralizado(doc, "")  # Espaço em branco entre assinaturas
+
+        adicionar_texto_centralizado(doc, "\nCiente e de acordo:\n")
+        coordenador = str(row.get("Coordenador", "")).strip()
+        if coordenador:
+            adicionar_texto_centralizado(doc, "_______________________")
+            adicionar_texto_centralizado(doc, coordenador)        

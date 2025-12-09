@@ -1,6 +1,7 @@
 from utils import adicionar_titulo_secao
 from docx.shared import Pt
 from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
 def gerar_secao_fiscalizacao(doc, row, nao_conformidades_df):
@@ -13,6 +14,17 @@ def gerar_secao_fiscalizacao(doc, row, nao_conformidades_df):
     espaco1.paragraph_format.space_after = Pt(12)
 
     adicionar_titulo_secao(doc, "4. FISCALIZAÇÃO")
+
+    par = doc.add_paragraph()
+    par.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    par.add_run(
+        "As ações de fiscalização foram realizadas pela equipe formada pelos Analistas de Regulação Alcides Vieira de "
+        "Azevedo Bezerra, matrícula 40672015/01 e Enildo Manoel da Silva Júnior, matrícula no 1796500/02, nos "
+        "dias 22 de setembro, na cidade de Garanhuns; 24 de setembro, em Petrolina; 25 de setembro, em Caruaru; e 30 de setembro de 2025 em Recife (TIP). "
+        "As Não Conformidades constatadas estão relacionadas ao Programa de Manutenção dos Terminais Rodoviários, "
+        "Anexo V do Contrato de Concessão, conforme descritas no Quadro 1, a seguir, com indicação dos respectivos registros fotográficos no Apêndice 1. "
+
+    )
 
     id_fisc = row["ID da Fiscalização"]
 
