@@ -1,31 +1,69 @@
-from utils import adicionar_titulo_secao
-from docx.shared import Pt
+from docx import Document
+from docx.shared import Pt, Cm 
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from utils import adicionar_titulo_secao, adicionar_paragrafo_justificado, adicionar_titulo_quadro 
+import pandas as pd
 
 
-def gerar_secao_fiscalizacao(doc, row, nao_conformidades_df):
+def gerar_secao_fiscalizacao(doc: Document, row, nao_conformidades_df):
     """
-    Gera a seção '4. RESUMO DAS NÃO CONFORMIDADES IDENTIFICADAS' no formato visual do relatório oficial,
-    com agrupamento por terminal e número sequencial.
+    Gera a seção '4. FISCALIZAÇÃO' e a tabela de Não Conformidades (Quadro 1), 
+    seguindo o formato visual do relatório.
     """
 
-    espaco1 = doc.add_paragraph()
-    espaco1.paragraph_format.space_after = Pt(12)
-
+    # 1. Título Principal
     adicionar_titulo_secao(doc, "4. FISCALIZAÇÃO")
+    doc.add_paragraph() 
+    
+    # 2. Primeiro Parágrafo (Equipe e Datas) - Nomes em Negrito, Matrículas SEM Negrito
+    par_equipe = doc.add_paragraph()
+    par_equipe.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    
+    par_equipe.add_run("As ações de fiscalização foram realizadas pela equipe formada pelos Analistas de Regulação ")
+    
+    # Nome 1 (Em negrito)
+    par_equipe.add_run("Alcides Vieira de Azevedo Bezerra").bold = True
+    # Matrícula 1 (SEM negrito)
+    par_equipe.add_run(", matrícula 40672015/01") 
+    par_equipe.add_run(" e ")
+    
+    # Nome 2 (Em negrito)
+    par_equipe.add_run("Enildo Manoel da Silva Júnior").bold = True
+    # Matrícula 2 (SEM negrito)
+    par_equipe.add_run(", matrícula nº 1796500/02")
+    
+    par_equipe.add_run(", nos dias 22 de setembro, na cidade de Garanhuns; 24 de setembro, em Petrolina; 25 de setembro, em Caruaru; e 30 de setembro de 2025 em Recife (TIP).")
 
-    par = doc.add_paragraph()
-    par.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    par.add_run(
-        "As ações de fiscalização foram realizadas pela equipe formada pelos Analistas de Regulação Alcides Vieira de "
-        "Azevedo Bezerra, matrícula 40672015/01 e Enildo Manoel da Silva Júnior, matrícula no 1796500/02, nos "
-        "dias 22 de setembro, na cidade de Garanhuns; 24 de setembro, em Petrolina; 25 de setembro, em Caruaru; e 30 de setembro de 2025 em Recife (TIP). "
-        "As Não Conformidades constatadas estão relacionadas ao Programa de Manutenção dos Terminais Rodoviários, "
-        "Anexo V do Contrato de Concessão, conforme descritas no Quadro 1, a seguir, com indicação dos respectivos registros fotográficos no Apêndice 1. "
 
+    # 3. Segundo Parágrafo (Introdução às Não Conformidades) - Menção ao Quadro 1 EM negrito
+    par_nc_intro = doc.add_paragraph()
+    par_nc_intro.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    
+    par_nc_intro.add_run("As Não Conformidades constatadas estão relacionadas ao ")
+    par_nc_intro.add_run("Programa de Manutenção dos Terminais Rodoviários").bold = True
+    par_nc_intro.add_run(", Anexo V do Contrato de Concessão, conforme descritas no ")
+    
+    # ✅ CORREÇÃO: Quadro 1 EM negrito
+    run_quadro1 = par_nc_intro.add_run("Quadro 1")
+    run_quadro1.bold = True
+    
+    par_nc_intro.add_run(", a seguir, com indicação dos respectivos registros fotográficos no ")
+    par_nc_intro.add_run("Apêndice 1").bold = True
+    par_nc_intro.add_run(".")
+
+    # Adiciona espaço para separar o parágrafo do quadro
+    doc.add_paragraph() 
+
+    # 4. Título do Quadro 
+    adicionar_titulo_quadro(
+        doc, 
+        "Quadro 1 – Não Conformidades por Terminal Rodoviário de Passageiros", 
+        negrito=True
     )
 
+    # 5. Lógica da Tabela de Não Conformidades (Quadro 1)
+    
     id_fisc = row["ID da Fiscalização"]
 
     nc_fisc = nao_conformidades_df[
@@ -44,13 +82,18 @@ def gerar_secao_fiscalizacao(doc, row, nao_conformidades_df):
     tabela = doc.add_table(rows=1, cols=2)
     tabela.style = "Table Grid"
     tabela.alignment = WD_TABLE_ALIGNMENT.LEFT
+    
+    # Ajuste das larguras
+    tabela.columns[0].width = Cm(4.5)  
+    tabela.columns[1].width = Cm(12.5) 
+    
 
     # Cabeçalhos
     cabecalho = tabela.rows[0].cells
     cabecalho[0].text = "TERMINAL"
     cabecalho[1].text = "NÃO CONFORMIDADE"
 
-    # Estilo cabeçalhos
+    # Estilo cabeçalhos (Manter em negrito e tamanho 11)
     for cell in cabecalho:
         for par in cell.paragraphs:
             run = par.runs[0]
@@ -92,10 +135,10 @@ def gerar_secao_fiscalizacao(doc, row, nao_conformidades_df):
             run_titulo.bold = True
             run_titulo.font.size = Pt(11)
 
-            run_desc = paragrafo_nc.add_run(f" – {descricao}")
+            run_desc = paragrafo_nc.add_run(f"  {descricao}")
             run_desc.font.size = Pt(11)
 
             num_nc += 1
 
-    espaco = doc.add_paragraph()
-    espaco.paragraph_format.space_after = Pt(24)
+    # Adiciona um espaço para separar o Quadro 1 do próximo conteúdo
+    doc.add_paragraph()

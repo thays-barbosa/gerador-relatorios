@@ -1,6 +1,27 @@
 from docx import Document
-from utils import adicionar_titulo_secao, adicionar_paragrafo_justificado
+from utils import adicionar_titulo_secao, adicionar_paragrafo_justificado, adicionar_tabela_informacoes
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+# 1. Definição dos Dados da Tabela (Pode ser transferido para um arquivo de configuração se houver muitos dados)
+DADOS_INFORMACOES_GERAIS = [
+    ("3.1 DO TITULAR", ""),
+    ("Titular:", "Empresa Pernambucana de Transportes Intermunicipal (EPTI)"),
+    ("Endereço:", "Av. Caxangá, 2.200  Cordeiro  Recife/PE  CEP: 50.711-000"),
+    ("Responsável:", "ANTÔNIO CARLOS REINAUX GOMES"),
+    ("3.2 DO REGULADO", ""),
+    ("Regulado:", "SOCICAM - Administração, Projetos e Representações Ltda"),
+    ("Responsável:", "THIAGO DUARTE PIMENTEL"),
+    ("Endereço:", "Avenida Prefeito Antônio Pereira, S/N  Várzea  Recife/PE  CEP: 50.950-030"),
+    ("Representantes para acompanhar:", "Monalisa da Silva Pereira (Recife/TIP)"),
+    ("3.3 DO REGULADOR", ""),
+    ("Regulador:", "Agência de Regulação de Pernambuco (Arpe)"),
+    ("Diretor Presidente:", "CARLOS PORTO FILHO"),
+    ("Endereço:", "Avenida Conselheiro Rosa e Silva, 975, Aflitos, Recife/PE, CEP: 52.050-020."),
+    ("Estacionamento:", "Rua do Futuro, 150, Aflitos, Recife/PE."),
+    ("Responsáveis pela fiscalização:", "Alcides Vieira de Azevedo Bezerra; Enildo Manoel da Silva Júnior"),
+    ("Período da Fiscalização:", "22 a 30 de Setembro de 2025."),
+    ("Tipo de Fiscalização:", "Direta e periódica."),
+]
 
 def gerar_secao_objetivo(doc: Document):
     adicionar_titulo_secao(doc, "2. OBJETIVO")
@@ -16,3 +37,7 @@ def gerar_secao_objetivo(doc: Document):
         "a legislação e normas vigentes de modo a determinar e/ou recomendar medidas corretivas, com foco na qualidade "
         "dos serviços prestados. "
     )
+
+    doc.add_paragraph()
+    adicionar_tabela_informacoes(doc, DADOS_INFORMACOES_GERAIS)
+    doc.add_paragraph()
