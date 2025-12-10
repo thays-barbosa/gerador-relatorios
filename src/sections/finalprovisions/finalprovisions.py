@@ -37,8 +37,8 @@ def gerar_secao_determinacoes_finais(doc: Document, row):
     # Conteúdo (Não Negrito)
     par2.add_run(
         ": adotar medidas para assegurar a manutenção, o monitoramento contínuo e o cumprimento do "
-        "Programa de Manutenção dos Terminais Rodoviários, constante da proposta da SOICICAM nos subitens 9.1.1 – "
-        "Manutenção Preventiva; 9.1.2 – manutenção Corretiva e 9.13 – tabela de classificação de níveis de falha "
+        "Programa de Manutenção dos Terminais Rodoviários, constante da proposta da SOICICAM nos subitens 9.1.1  "
+        "Manutenção Preventiva; 9.1.2  manutenção Corretiva e 9.13  tabela de classificação de níveis de falha "
         "(tabela de tempos máximos para os níveis de atendimento)."
     )
 
