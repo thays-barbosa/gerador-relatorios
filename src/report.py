@@ -11,6 +11,7 @@ from sections.introduction.introduction import gerar_secao_introducao
 from sections.objective.objective import gerar_secao_objetivo
 from sections.recommendations.recommendations import gerar_secao_recomendacoes
 from sections.methodology.methodology import gerar_secao_metodologia
+from sections.abbreviations.abbreviations import gerar_secao_abreviaturas
 from sections.conclusions.conclusions import (
     gerar_secao_conclusoes,
 )
@@ -133,6 +134,11 @@ def gerar_relatorio():
 
         doc.add_section(WD_SECTION.NEW_PAGE)
 
+        # 🚨 CORREÇÃO APLICADA: Passa o BASE_DIR para que a seção de abreviaturas localize a planilha.
+        gerar_secao_abreviaturas(doc, BASE_DIR) 
+        
+        doc.add_section(WD_SECTION.NEW_PAGE) # Adicionando quebra de página após a seção de abreviaturas
+        
         gerar_secao_introducao(doc)
         gerar_secao_objetivo(doc)
         gerar_secao_metodologia(doc, row)

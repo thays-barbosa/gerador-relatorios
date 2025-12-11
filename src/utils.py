@@ -354,3 +354,72 @@ def adicionar_apendice_fotos(doc, caminho_base_fotos, id_fiscalizacao, caminho_p
                 # Adiciona um espaço em branco para manter a célula formatada
                 celula_foto_vazia.add_paragraph("").alignment = WD_ALIGN_PARAGRAPH.CENTER
                 celula_legenda_vazia.add_paragraph("").alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+# --- SUBSTITUIR FUNÇÃO EM utils.py ---
+
+# --- SUBSTITUIR FUNÇÃO EM utils.py ---
+
+from docx.shared import Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL 
+
+def adicionar_tabela_abreviaturas(doc, df_abreviaturas):
+    """
+    Cria uma tabela simples de duas colunas (SIGLA e DEFINIÇÃO)
+    com base nos dados do DataFrame, aplicando negrito na coluna Sigla e alinhamento vertical.
+    """
+    # Cria a tabela (número de linhas: cabeçalho + dados)
+    tabela = doc.add_table(rows=len(df_abreviaturas) + 1, cols=2)
+    tabela.autofit = False
+    
+    # Aplica o estilo de borda nativo do Word e centraliza a tabela
+    tabela.style = 'Table Grid'
+    tabela.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # 🚨 AJUSTE DE LARGURA: Acentuando a diferença para que a coluna SIGLA fique visivelmente menor
+    largura_sigla_cm = 2.5 # REDUZIDO para 2.5cm
+    largura_definicao_cm = 14.5 # AUMENTADO para 14.5cm
+    tabela.columns[0].width = Cm(largura_sigla_cm)
+    tabela.columns[1].width = Cm(largura_definicao_cm)
+    
+    # 1. Cabeçalho
+    header_cells = tabela.rows[0].cells
+    
+    # Configuração comum para células do Cabeçalho (Vertical alignment)
+    for cell in header_cells:
+        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+    # Célula SIGLA (Header)
+    par_sigla = header_cells[0].paragraphs[0]
+    par_sigla.text = ""
+    run_sigla = par_sigla.add_run("SIGLA")
+    run_sigla.bold = True
+    par_sigla.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Célula DEFINIÇÃO (Header)
+    par_def = header_cells[1].paragraphs[0]
+    par_def.text = ""
+    run_def = par_def.add_run("DEFINIÇÃO") # Texto no cabeçalho sem espaço
+    run_def.bold = True
+    par_def.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # 2. Preenche as linhas de dados
+    for i, row in df_abreviaturas.iterrows():
+        cells = tabela.rows[i + 1].cells
+        
+        # Configuração comum para células de Dados (Vertical alignment)
+        for cell in cells:
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER 
+
+        # Sigla (Centralizada e Negrito)
+        par_sigla_data = cells[0].paragraphs[0]
+        par_sigla_data.text = ""
+        run_sigla_data = par_sigla_data.add_run(str(row['Sigla']))
+        par_sigla_data.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # Definição (Esquerda)
+        par_def_data = cells[1].paragraphs[0]
+        par_def_data.text = ""
+        # Usando 'Definição ' (com espaço) para corresponder ao DataFrame do usuário
+        par_def_data.add_run(str(row['Definição '])) 
+        par_def_data.alignment = WD_ALIGN_PARAGRAPH.LEFT
