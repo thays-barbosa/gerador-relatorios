@@ -77,7 +77,8 @@ def gerar_relatorio():
         id_fisc = row["ID da Fiscalização"]
         doc = Document()
 
-        doc.add_picture(os.path.join(BASE_DIR, "assets/logo_arpe.jpg"), width=Inches(2))
+        adicionar_texto_centralizado(doc, "RELATÓRIO DE FISCALIZAÇÃO")
+        doc.add_picture(os.path.join(BASE_DIR, "assets/logo_arpe.jpg"), width=Inches(6)) #mudei de 2 para 6
         logo_arpe = doc.paragraphs[-1]
         logo_arpe.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
         adicionar_texto_centralizado(doc, "FISCALIZAÇÃO NOS TERMINAIS RODOVIÁRIOS INTERMUNICIPAIS DE PASSAGEIROSL")
