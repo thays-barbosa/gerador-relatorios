@@ -53,12 +53,6 @@ def gerar_relatorio():
     nao_conformidades_df = pd.read_excel(
         CAMINHO_PLANILHA, sheet_name="Não-conformidades "
     )
-    observacoes_df = pd.read_excel(
-        CAMINHO_PLANILHA, sheet_name="Observações Importantes"
-    )
-    recomendacoes_df = pd.read_excel(
-        CAMINHO_PLANILHA, sheet_name="Recomendações"
-    )
 
     if COLUNA_STATUS not in fiscalizacoes_df.columns:
         fiscalizacoes_df[COLUNA_STATUS] = False
@@ -99,7 +93,7 @@ def gerar_relatorio():
         gerar_secao_determinacoes_finais(doc, row)
         gerar_secao_recomendacoes(doc,row)
         gerar_secao_conclusoes(
-            doc, row, nao_conformidades_df, FOTOS_DIR, observacoes_df, recomendacoes_df
+            doc, row
         )
        
 
@@ -124,12 +118,6 @@ def gerar_relatorio():
             fiscalizacoes_df.to_excel(writer, sheet_name="Fiscalizações", index=False)
             nao_conformidades_df.to_excel(
                 writer, sheet_name="Não-conformidades ", index=False
-            )
-            observacoes_df.to_excel(
-                writer, sheet_name="Observações Importantes", index=False
-            )
-            recomendacoes_df.to_excel(
-                writer, sheet_name="Recomendações", index=False
             )
 
         ajustar_largura_colunas(CAMINHO_PLANILHA)
