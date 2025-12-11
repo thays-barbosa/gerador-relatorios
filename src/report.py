@@ -27,6 +27,15 @@ from utils import (
 )
 
 
+# --- NOVA FUNÇÃO AUXILIAR PARA SAÍDA CONTROLADA ---
+def aguardar_e_encerrar(mensagem):
+    """Exibe uma mensagem de erro e espera o usuário pressionar Enter para encerrar."""
+    print(f"\n❌ ERRO: {mensagem}")
+    input("Aperte Enter para encerrar...")
+    sys.exit(1)
+# ---------------------------------------------------
+
+
 def gerar_relatorio():
     """
     Gera o relatório completo (docx + pdf) com base nos dados da fiscalização.
@@ -48,6 +57,44 @@ def gerar_relatorio():
     if arquivo_em_uso(CAMINHO_PLANILHA):
         print("⚠️ A planilha está em uso. Feche-a antes de executar o script.")
         exit(1)
+
+    DIRETORIO_PAI_FOTOS = FOTOS_DIR 
+    
+    
+    # --- NOVO BLOCO DE ENTRADA E VALIDAÇÃO DE CAMINHO ---
+    print("\n--- Configuração do Apêndice Fotográfico ---")
+    
+    # 1. VALIDAÇÃO DA PASTA PRINCIPAL (CTR-XX-XXXX)
+    while True:
+        pasta_principal_input = input("➡️ Digite o nome da PASTA (ex: CTR-02-2024): ").strip()
+        
+        # Converte para MAIÚSCULAS para ser case-insensitive na checagem
+        pasta_principal_fotos = pasta_principal_input.upper() 
+        
+        caminho_pasta_principal = os.path.join(DIRETORIO_PAI_FOTOS, pasta_principal_fotos)
+        
+        if not os.path.isdir(caminho_pasta_principal):
+            aguardar_e_encerrar("A Pasta procurada não existe, por favor, cheque seus documentos.")
+        else:
+            break
+            
+    # 2. VALIDAÇÃO DA SUBPASTA (F0)
+    while True:
+        subpasta_input = input("➡️ Digite o nome da SUBPASTA (ex: F0): ").strip()
+        
+        # Converte para MAIÚSCULAS para ser case-insensitive na checagem
+        subpasta_fotos = subpasta_input.upper()
+        
+        caminho_base_fotos = os.path.join(caminho_pasta_principal, subpasta_fotos)
+        
+        if not os.path.isdir(caminho_base_fotos):
+            aguardar_e_encerrar("A subpasta procurada não existe, por favor, cheque seus documentos.")
+        else:
+            break
+            
+    print("------------------------------------------") 
+    # ----------------------------------------------------
+
 
     fiscalizacoes_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Fiscalizações")
     nao_conformidades_df = pd.read_excel(
@@ -92,10 +139,15 @@ def gerar_relatorio():
         gerar_secao_fiscalizacao(doc, row, nao_conformidades_df)
         gerar_secao_determinacoes_finais(doc, row)
         gerar_secao_recomendacoes(doc,row)
+        
+        # --- CHAMADA MODIFICADA: Passa apenas o caminho final validado ---
         gerar_secao_conclusoes(
-            doc, row
+            doc, 
+            row, 
+            caminho_planilha_legendas=CAMINHO_PLANILHA, 
+            caminho_base_fotos=caminho_base_fotos # NOVO ARGUMENTO ÚNICO
         )
-       
+        # -----------------------------------------------------------------
 
         nome_arquivo = f"relatorio_{id_fisc}"
         caminho_docx = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.docx")
