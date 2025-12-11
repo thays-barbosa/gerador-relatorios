@@ -3,7 +3,7 @@ from docx2pdf import convert
 from docx.shared import Inches
 import pandas as pd
 from tqdm import tqdm
-from docx.enum.section import WD_SECTION
+from docx.enum.section import WD_SECTION  # 🚨 CORRIGIDO: Importação explícita do WD_SECTION
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 import sys
 import os
@@ -12,6 +12,7 @@ from sections.objective.objective import gerar_secao_objetivo
 from sections.recommendations.recommendations import gerar_secao_recomendacoes
 from sections.methodology.methodology import gerar_secao_metodologia
 from sections.abbreviations.abbreviations import gerar_secao_abreviaturas
+from sections.cover.cover import gerar_capa  # 🚨 NOVO IMPORT DA CAPA
 from sections.conclusions.conclusions import (
     gerar_secao_conclusoes,
 )
@@ -62,7 +63,7 @@ def gerar_relatorio():
     DIRETORIO_PAI_FOTOS = FOTOS_DIR 
     
     
-    # --- NOVO BLOCO DE ENTRADA E VALIDAÇÃO DE CAMINHO ---
+    # --- BLOCO DE ENTRADA E VALIDAÇÃO DE CAMINHO ---
     print("\n--- Configuração do Apêndice Fotográfico ---")
     
     # 1. VALIDAÇÃO DA PASTA PRINCIPAL (CTR-XX-XXXX)
@@ -97,10 +98,15 @@ def gerar_relatorio():
     # ----------------------------------------------------
 
 
+    # Lendo planilhas e limpando nomes de colunas por segurança
     fiscalizacoes_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Fiscalizações")
+    fiscalizacoes_df.columns = fiscalizacoes_df.columns.str.strip() 
+
     nao_conformidades_df = pd.read_excel(
         CAMINHO_PLANILHA, sheet_name="Não-conformidades "
     )
+    nao_conformidades_df.columns = nao_conformidades_df.columns.str.strip()
+
 
     if COLUNA_STATUS not in fiscalizacoes_df.columns:
         fiscalizacoes_df[COLUNA_STATUS] = False
@@ -119,26 +125,15 @@ def gerar_relatorio():
         id_fisc = row["ID da Fiscalização"]
         doc = Document()
 
-        adicionar_texto_centralizado(doc, "RELATÓRIO DE FISCALIZAÇÃO")
-        doc.add_picture(os.path.join(BASE_DIR, "assets/logo_arpe.jpg"), width=Inches(6)) #mudei de 2 para 6
-        logo_arpe = doc.paragraphs[-1]
-        logo_arpe.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-        adicionar_texto_centralizado(doc, "FISCALIZAÇÃO NOS TERMINAIS RODOVIÁRIOS INTERMUNICIPAIS DE PASSAGEIROSL")
-        adicionar_texto_centralizado(doc, "PRESTADOR DE SERVIÇO: SOCICAM - ADMINISTRAÇÃO, PROJETOS E REPRESENTAÇÕES LTDA")
-        adicionar_texto_centralizado(
-            doc, "RELATÓRIO DE FISCALIZAÇÃO PROC ADM Nº xx/xxxx - CTR"
-        )
-        adicionar_texto_centralizado(
-            doc, "SEI Nº xxxxxxxxxx.xxxxxx/xxxx-xx"
-        )
+        # 🚨 ETAPA 1: GERAÇÃO DA CAPA (Capa inclui quebra de página)
+        gerar_capa(doc, BASE_DIR, row)
 
-        doc.add_section(WD_SECTION.NEW_PAGE)
-
-        # 🚨 CORREÇÃO APLICADA: Passa o BASE_DIR para que a seção de abreviaturas localize a planilha.
-        gerar_secao_abreviaturas(doc, BASE_DIR) 
+        # 🚨 ETAPA 2: LISTA DE ABREVIATURAS E SIGLAS
+        # A nova seção de capa já inseriu uma quebra de página, então começamos a próxima seção.
+        gerar_secao_abreviaturas(doc, CAMINHO_PLANILHA) # Passa o caminho completo da planilha
+        doc.add_section(WD_SECTION.NEW_PAGE) # Quebra após abreviaturas
         
-        doc.add_section(WD_SECTION.NEW_PAGE) # Adicionando quebra de página após a seção de abreviaturas
-        
+        # 🚨 ETAPAS SEGUINTES DO RELATÓRIO
         gerar_secao_introducao(doc)
         gerar_secao_objetivo(doc)
         gerar_secao_metodologia(doc, row)
@@ -146,12 +141,12 @@ def gerar_relatorio():
         gerar_secao_determinacoes_finais(doc, row)
         gerar_secao_recomendacoes(doc,row)
         
-        # --- CHAMADA MODIFICADA: Passa apenas o caminho final validado ---
+        # --- CONCLUSÕES E APÊNDICE FOTOGRÁFICO ---
         gerar_secao_conclusoes(
             doc, 
             row, 
             caminho_planilha_legendas=CAMINHO_PLANILHA, 
-            caminho_base_fotos=caminho_base_fotos # NOVO ARGUMENTO ÚNICO
+            caminho_base_fotos=caminho_base_fotos 
         )
         # -----------------------------------------------------------------
 
@@ -165,11 +160,13 @@ def gerar_relatorio():
 
     # 🔹 Garantir que a coluna Data seja salva no formato dd/mm/aaaa
     if "Data" in fiscalizacoes_df.columns:
+        # Tenta converter para datetime antes de formatar
         fiscalizacoes_df["Data"] = pd.to_datetime(
             fiscalizacoes_df["Data"], errors="coerce"
         ).dt.strftime("%d/%m/%Y")
 
     if not arquivo_em_uso(CAMINHO_PLANILHA):
+        # Usando 'a' (append) e 'if_sheet_exists="replace"' para atualizar as abas
         with pd.ExcelWriter(
             CAMINHO_PLANILHA, engine="openpyxl", mode="a", if_sheet_exists="replace"
         ) as writer:

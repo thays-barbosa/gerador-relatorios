@@ -7,37 +7,65 @@ from docx.oxml.ns import qn
 from PIL import Image
 import io
 from docx import Document
-import pandas as pd  # Importado para pd.read_excel
-from docx.enum.table import WD_ALIGN_VERTICAL  # Importado para WD_ALIGN_VERTICAL
-from docx.table import _Cell # Importação útil
+import pandas as pd
+from docx.enum.table import WD_ALIGN_VERTICAL
+from docx.table import _Cell 
 
 # --- Funções auxiliares de formatação: ---
+
+def remover_espacamento_paragrafo(paragrafo):
+    """Remove o espaçamento antes e depois do parágrafo e define espaçamento zero."""
+    # Garante que o espaçamento antes e depois seja 0pt (para compactar)
+    paragrafo_format = paragrafo.paragraph_format
+    paragrafo_format.space_before = Pt(0)
+    paragrafo_format.space_after = Pt(0)
+    
+def adicionar_quebra_linha_controlada(doc, altura_pt=18):
+    """Adiciona uma linha vazia com espaçamento controlado para forçar o layout na Capa."""
+    paragrafo = doc.add_paragraph()
+    # Usa a função auxiliar para remover o espaçamento padrão
+    remover_espacamento_paragrafo(paragrafo)
+    
+    # Adiciona um "run" vazio e define o tamanho da fonte para controlar a altura da linha
+    run = paragrafo.add_run("")
+    run.font.size = Pt(altura_pt)
+
 
 def adicionar_paragrafo_justificado(doc, texto, tamanho_fonte=12):
     """Adiciona um parágrafo com texto justificado."""
     paragrafo = doc.add_paragraph(texto)
     paragrafo.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    # Se precisar do JUSTIFY_LOW (justificação justificada em português):
-    # paragrafo.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY_LOW
+    # Se precisar de espaçamento zero (compacto):
+    # remover_espacamento_paragrafo(paragrafo)
 
 
 def adicionar_texto_centralizado(doc, texto, tamanho_fonte=12):
-    """Adiciona um parágrafo com texto centralizado."""
+    """Adiciona um parágrafo com texto centralizado (com negrito por padrão) e ESPAÇAMENTO CONTROLADO."""
+    
     paragraph = doc.add_paragraph()
+    
+    # 🚨 CORREÇÃO: Remove o espaçamento padrão para uso em blocos compactos (ex: Capa)
+    remover_espacamento_paragrafo(paragraph)
+    
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = paragraph.add_run(texto)
     run.bold = True
+    # run.font.size = Pt(tamanho_fonte) # Se o tamanho for importante
 
 
 def adicionar_titulo_secao(doc, texto):
     """Adiciona um título de seção formatado."""
     secao = doc.add_paragraph()
     secao.add_run(texto).bold = True
+    # Remover espaçamento padrão para melhor controle entre títulos e texto
+    remover_espacamento_paragrafo(secao)
 
 def adicionar_titulo_quadro(doc, texto, negrito=False, tamanho=11):
     """Adiciona um título de Quadro/Figura centralizado."""
     paragrafo = doc.add_paragraph()
     paragrafo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Remover espaçamento padrão para melhor controle com a figura/quadro
+    remover_espacamento_paragrafo(paragrafo)
     run = paragrafo.add_run(texto)
     run.bold = negrito
     # run.font.size = Pt(tamanho) # Opcional: manter o tamanho padrão do corpo do texto ou forçar um específico
@@ -45,6 +73,7 @@ def adicionar_titulo_quadro(doc, texto, negrito=False, tamanho=11):
 
 # Função para ajustar a largura das colunas (Excel)
 def ajustar_largura_colunas(caminho_planilha):
+    """Ajusta a largura das colunas de todas as abas no arquivo Excel."""
     wb = load_workbook(caminho_planilha)
     # Itera sobre todas as planilhas do Excel para ajustar a largura
     for sheet_name in wb.sheetnames:
@@ -59,11 +88,11 @@ def ajustar_largura_colunas(caminho_planilha):
                     if celula.value:
                         # Adiciona uma lógica para tratar números formatados como texto
                         if isinstance(celula.value, (int, float)):
-                             # Se for número, trata como string formatada. Aqui simplifica para len(str)
-                             length = len(str(celula.value))
+                            # Se for número, trata como string formatada. Aqui simplifica para len(str)
+                            length = len(str(celula.value))
                         else:
-                             length = len(str(celula.value))
-                             
+                            length = len(str(celula.value))
+                            
                         max_length = max(max_length, length)
                 except:
                     pass
@@ -81,7 +110,9 @@ def ajustar_largura_colunas(caminho_planilha):
 
 # Função para verificar se arquivo está em uso
 def arquivo_em_uso(caminho):
+    """Verifica se o arquivo está aberto/em uso."""
     try:
+        # Tenta renomear o arquivo para si mesmo. Falha se estiver em uso.
         os.rename(caminho, caminho)
         return False
     except PermissionError:
@@ -91,6 +122,7 @@ def arquivo_em_uso(caminho):
 def aplicar_estilo_texto(
     run, tamanho=12, negrito=False, fonte="Arial", cor_rgb=(0, 0, 0)
 ):
+    """Aplica estilo completo em um 'run' do Word (fonte, tamanho, cor, negrito)."""
     run.font.name = fonte
     run._element.rPr.rFonts.set(qn("w:eastAsia"), fonte)
     run.font.size = Pt(tamanho)
@@ -99,21 +131,24 @@ def aplicar_estilo_texto(
 
 
 def aplicar_borda_paragrafo(paragraph):
+    """Aplica borda completa ao redor de um parágrafo (usado em legendas)."""
     p = paragraph._element
     pPr = p.get_or_add_pPr()
     borders = OxmlElement("w:pBdr")
     for border_name in ("top", "left", "bottom", "right"):
         border = OxmlElement(f"w:{border_name}")
         border.set(qn("w:val"), "single")
-        border.set(qn("w:sz"), "4")
-        border.set(qn("w:space"), "2")
+        border.set(qn("w:sz"), "4") # Espessura
+        border.set(qn("w:space"), "2") # Espaçamento
         border.set(qn("w:color"), "000000")
         borders.append(border)
     pPr.append(borders)
 
 
 def adicionar_legenda_formatada(doc, texto):
+    """Adiciona uma legenda formatada com estilo cinza e borda."""
     par = doc.add_paragraph()
+    remover_espacamento_paragrafo(par) # Compactação
     run = par.add_run(texto)
     aplicar_estilo_texto(run, tamanho=10, fonte="Arial", cor_rgb=(90, 90, 90))
     par.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -121,6 +156,9 @@ def adicionar_legenda_formatada(doc, texto):
 
 
 def processar_imagem_para_relatorio(caminho_imagem, largura_max=1024, qualidade=80):
+    """
+    Otimiza (redimensiona e comprime) uma imagem e a retorna em um buffer de memória.
+    """
     # Abre a imagem
     img = Image.open(caminho_imagem)
     # Converte para RGB se necessário (evita problemas com PNG/transparência)
@@ -130,7 +168,8 @@ def processar_imagem_para_relatorio(caminho_imagem, largura_max=1024, qualidade=
     if img.width > largura_max:
         proporcao = largura_max / float(img.width)
         altura_nova = int(float(img.height) * proporcao)
-        img = img.resize((largura_max, altura_nova), Image.LANCZOS)
+        # Usando Image.Resampling.LANCZOS no Pillow 9.0+
+        img = img.resize((largura_max, altura_nova), Image.Resampling.LANCZOS)
     # Salva em memória, sem metadados, com compressão JPEG
     buffer = io.BytesIO()
     img.save(buffer, format="JPEG", quality=qualidade, optimize=True)
@@ -158,12 +197,13 @@ def adicionar_cabecalho_tabela(doc, texto, tamanho_fonte=12):
     
     # Cria um parágrafo normal
     paragrafo = doc.add_paragraph()
+    remover_espacamento_paragrafo(paragrafo) # Compactação
     run = paragrafo.add_run(texto.upper())
     run.bold = True
     
     paragrafo.alignment = WD_ALIGN_PARAGRAPH.LEFT 
     
-    doc.add_paragraph() # Adiciona espaço após o título
+    adicionar_quebra_linha_controlada(doc, altura_pt=12) # Adiciona espaço controlado após o título
     
 
 def adicionar_tabela_informacoes(doc, dados_tabela):
@@ -201,6 +241,7 @@ def adicionar_tabela_informacoes(doc, dados_tabela):
             
             # 3. Adiciona e formata o texto
             par = celula_principal.paragraphs[0] if celula_principal.paragraphs else celula_principal.add_paragraph()
+            remover_espacamento_paragrafo(par) # Compactação
             par.text = ''
             run = par.add_run(rotulo)
             run.bold = True
@@ -213,6 +254,7 @@ def adicionar_tabela_informacoes(doc, dados_tabela):
         
         # Rótulo (Primeira Coluna) - SEMPRE em negrito na imagem
         par_rotulo = celula_rotulo.paragraphs[0] if celula_rotulo.paragraphs else celula_rotulo.add_paragraph()
+        remover_espacamento_paragrafo(par_rotulo) # Compactação
         par_rotulo.text = ''
         run_rotulo = par_rotulo.add_run(rotulo)
         run_rotulo.bold = True
@@ -220,6 +262,7 @@ def adicionar_tabela_informacoes(doc, dados_tabela):
         
         # Valor (Segunda Coluna) - Negrito Condicional
         par_valor = celula_valor.paragraphs[0] if celula_valor.paragraphs else celula_valor.add_paragraph()
+        remover_espacamento_paragrafo(par_valor) # Compactação
         par_valor.text = ''
         run_valor = par_valor.add_run(valor)
         par_valor.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -237,6 +280,7 @@ def adicionar_imagem_na_celula(celula, caminho_imagem, largura_max_cm=7.5):
     """
     # Adiciona um novo parágrafo na célula para a imagem
     paragrafo_img = celula.add_paragraph()
+    remover_espacamento_paragrafo(paragrafo_img) # Compactação
     paragrafo_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     # Processa a imagem para otimização (usando sua função existente)
@@ -254,28 +298,21 @@ def adicionar_imagem_na_celula(celula, caminho_imagem, largura_max_cm=7.5):
 def adicionar_apendice_fotos(doc, caminho_base_fotos, id_fiscalizacao, caminho_planilha_legendas):
     """
     Gera o Apêndice 1 com as fotos dinâmicas, seguindo o layout 2x2.
-    
-    Args:
-        doc (Document): O objeto do documento Word.
-        caminho_base_fotos (str): O caminho para a subpasta F0 (ex: 'CTR-02-2024/F0').
-        id_fiscalizacao (str): O ID para buscar a linha de legendas.
-        caminho_planilha_legendas (str): O caminho do arquivo Excel com as legendas.
     """
     # 1. Busca e prepara as legendas
     # Assumindo que o nome da aba foi corrigido para "Não-conformidades " (com espaço)
     df_legendas = pd.read_excel(caminho_planilha_legendas, sheet_name="Não-conformidades ")
     
     # Filtra a linha correta pelo ID
+    # Limpa espaços nas colunas para evitar KeyError
+    df_legendas.columns = df_legendas.columns.str.strip() 
     linha_legenda = df_legendas[df_legendas['ID da Fiscalização'] == id_fiscalizacao]
     
     if linha_legenda.empty:
         adicionar_paragrafo_justificado(doc, f"AVISO: Legendas não encontradas na planilha para o ID: {id_fiscalizacao}. As fotos não serão legendadas.")
-        # Retorna lista vazia de legendas para que as fotos sejam incluídas sem legenda
         legendas = [] 
-        # return # Não queremos retornar, queremos incluir as fotos sem legenda
     else:
         # Extrai o texto da coluna 'Legenda da Foto' e separa
-        # *CORRIGIDO*: Usando 'Legenda da Foto' (com F maiúsculo) para evitar o KeyError
         texto_legendas = str(linha_legenda['Legenda da Foto'].iloc[0]) 
         legendas = [l.strip() for l in texto_legendas.split(';') if l.strip()]
 
@@ -288,36 +325,31 @@ def adicionar_apendice_fotos(doc, caminho_base_fotos, id_fiscalizacao, caminho_p
             if f.lower().endswith(('.png', '.jpg', '.jpeg'))
         ])
     except FileNotFoundError:
-        # Este erro deve ser capturado antes no report.py, mas é bom ter uma segurança
         adicionar_paragrafo_justificado(doc, f"ERRO INTERNO: O caminho de fotos '{caminho_base_fotos}' não foi encontrado.")
         return
 
     if not arquivos_fotos:
-        # AVISO solicitado pelo usuário para subpasta vazia
         adicionar_paragrafo_justificado(doc, f"AVISO: A subpasta procurada está vazia, Seu Apêndice não terá fotos.")
         return
 
     # 3. Cria a estrutura da tabela (layout de 2x2)
     
-    # Número de fotos deve ser par para o layout 2x2.
     num_fotos = len(arquivos_fotos)
-    # Calcula o número de linhas necessárias (duas células por linha, mais uma linha de legenda para cada linha de foto)
+    # Linhas: 1 linha de foto + 1 linha de legenda para cada 2 fotos
     num_linhas_tabela = ((num_fotos + 1) // 2) * 2 
     
     tabela = doc.add_table(rows=num_linhas_tabela, cols=2)
     tabela.autofit = False
     tabela.style = 'Table Grid'
     
-    # Define a largura das colunas (metade da página, menos margem)
+    # Define a largura das colunas
     largura_coluna_cm = 8.5 
     tabela.columns[0].width = Cm(largura_coluna_cm)
     tabela.columns[1].width = Cm(largura_coluna_cm)
     
     # 4. Popula a tabela
-    for i in range(num_linhas_tabela // 2): # Itera sobre as linhas de fotos
-        # Linha para Fotos
+    for i in range(num_linhas_tabela // 2): # Itera sobre os "pares" de linhas (Foto + Legenda)
         linha_foto_idx = i * 2
-        # Linha para Legendas
         linha_legenda_idx = i * 2 + 1 
         
         for j in range(2): # Coluna 0 e Coluna 1
@@ -333,35 +365,33 @@ def adicionar_apendice_fotos(doc, caminho_base_fotos, id_fiscalizacao, caminho_p
                 # --- B. Célula da Legenda ---
                 celula_legenda = tabela.cell(linha_legenda_idx, j)
                 
-                # Alinhamento da Legenda
                 celula_legenda.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 par_legenda = celula_legenda.paragraphs[0] if celula_legenda.paragraphs else celula_legenda.add_paragraph()
+                remover_espacamento_paragrafo(par_legenda) # Compactação
                 par_legenda.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-                # Pega a legenda correta (ou string de aviso)
+                # Pega a legenda correta
                 texto_legenda = legendas[foto_idx] if foto_idx < len(legendas) else f"Legenda {foto_idx + 1} não fornecida na planilha."
                 
                 # Adiciona e formata o texto da legenda
                 run_legenda = par_legenda.add_run(texto_legenda)
-                # Aplica estilo: tamanho=10, fonte="Arial", cor_rgb=(90, 90, 90)
                 aplicar_estilo_texto(run_legenda, tamanho=10, fonte="Arial", cor_rgb=(90, 90, 90))
                 
             else:
-                # Se não houver mais fotos (para preencher as células que sobram)
+                # Preenche células vazias
                 celula_foto_vazia = tabela.cell(linha_foto_idx, j)
                 celula_legenda_vazia = tabela.cell(linha_legenda_idx, j)
                 
-                # Adiciona um espaço em branco para manter a célula formatada
-                celula_foto_vazia.add_paragraph("").alignment = WD_ALIGN_PARAGRAPH.CENTER
-                celula_legenda_vazia.add_paragraph("").alignment = WD_ALIGN_PARAGRAPH.CENTER
+                par_foto_vazia = celula_foto_vazia.add_paragraph("")
+                remover_espacamento_paragrafo(par_foto_vazia)
+                par_foto_vazia.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                par_legenda_vazia = celula_legenda_vazia.add_paragraph("")
+                remover_espacamento_paragrafo(par_legenda_vazia)
+                par_legenda_vazia.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-# --- SUBSTITUIR FUNÇÃO EM utils.py ---
 
-# --- SUBSTITUIR FUNÇÃO EM utils.py ---
-
-from docx.shared import Cm
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_ALIGN_VERTICAL 
+# --- FUNÇÃO DE GERAÇÃO DA TABELA DE ABREVIATURAS (CORRIGIDA) ---
 
 def adicionar_tabela_abreviaturas(doc, df_abreviaturas):
     """
@@ -376,21 +406,21 @@ def adicionar_tabela_abreviaturas(doc, df_abreviaturas):
     tabela.style = 'Table Grid'
     tabela.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # 🚨 AJUSTE DE LARGURA: Acentuando a diferença para que a coluna SIGLA fique visivelmente menor
-    largura_sigla_cm = 2.5 # REDUZIDO para 2.5cm
-    largura_definicao_cm = 14.5 # AUMENTADO para 14.5cm
+    # 🚨 AJUSTE DE LARGURA: Acentuando a diferença
+    largura_sigla_cm = 2.5 # Ajustado
+    largura_definicao_cm = 14.5 # Ajustado
     tabela.columns[0].width = Cm(largura_sigla_cm)
     tabela.columns[1].width = Cm(largura_definicao_cm)
     
-    # 1. Cabeçalho
+    # 1. Cabeçalho (Negrito e Centralizado)
     header_cells = tabela.rows[0].cells
     
-    # Configuração comum para células do Cabeçalho (Vertical alignment)
     for cell in header_cells:
         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
     # Célula SIGLA (Header)
     par_sigla = header_cells[0].paragraphs[0]
+    remover_espacamento_paragrafo(par_sigla) # Compactação
     par_sigla.text = ""
     run_sigla = par_sigla.add_run("SIGLA")
     run_sigla.bold = True
@@ -398,8 +428,9 @@ def adicionar_tabela_abreviaturas(doc, df_abreviaturas):
     
     # Célula DEFINIÇÃO (Header)
     par_def = header_cells[1].paragraphs[0]
+    remover_espacamento_paragrafo(par_def) # Compactação
     par_def.text = ""
-    run_def = par_def.add_run("DEFINIÇÃO") # Texto no cabeçalho sem espaço
+    run_def = par_def.add_run("DEFINIÇÃO")
     run_def.bold = True
     par_def.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
@@ -407,19 +438,87 @@ def adicionar_tabela_abreviaturas(doc, df_abreviaturas):
     for i, row in df_abreviaturas.iterrows():
         cells = tabela.rows[i + 1].cells
         
-        # Configuração comum para células de Dados (Vertical alignment)
         for cell in cells:
             cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER 
 
         # Sigla (Centralizada e Negrito)
         par_sigla_data = cells[0].paragraphs[0]
+        remover_espacamento_paragrafo(par_sigla_data) # Compactação
         par_sigla_data.text = ""
         run_sigla_data = par_sigla_data.add_run(str(row['Sigla']))
+        run_sigla_data.bold = True 
         par_sigla_data.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
         # Definição (Esquerda)
         par_def_data = cells[1].paragraphs[0]
+        remover_espacamento_paragrafo(par_def_data) # Compactação
         par_def_data.text = ""
-        # Usando 'Definição ' (com espaço) para corresponder ao DataFrame do usuário
-        par_def_data.add_run(str(row['Definição '])) 
+        par_def_data.add_run(str(row['Definição'])) 
         par_def_data.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+# --- FUNÇÕES AUXILIARES PARA A CAPA ---
+
+def parear_responsaveis_e_matriculas(nomes_str, matriculas_str, cargo_fixo="Analista de Regulação, matrícula nº"):
+    """
+    Divide as strings de nomes e matrículas pelo caractere ';' e as emparelha.
+    Retorna uma lista de dicionários com 'nome' e 'info_completa'.
+    """
+    if not nomes_str or not matriculas_str:
+        return []
+
+    # Divide e remove espaços em branco (strip)
+    nomes = [n.strip() for n in nomes_str.split(';') if n.strip()]
+    matriculas = [m.strip() for m in matriculas_str.split(';') if m.strip()]
+    
+    profissionais = []
+    
+    # Emparelha nomes e matrículas
+    for nome, matricula in zip(nomes, matriculas):
+        info_completa = f"{cargo_fixo} {matricula}"
+        profissionais.append({
+            'nome': nome,
+            'info_completa': info_completa
+        })
+        
+    return profissionais
+
+def formatar_data_capa(data_str):
+    """
+    Converte a data 'DD/MM/AAAA' para 'Mês, AAAA'.
+    """
+    if not data_str:
+        return ""
+    
+    try:
+        meses = {
+            '01': 'Janeiro', '02': 'Fevereiro', '03': 'Março', '04': 'Abril',
+            '05': 'Maio', '06': 'Junho', '07': 'Julho', '08': 'Agosto',
+            '09': 'Setembro', '10': 'Outubro', '11': 'Novembro', '12': 'Dezembro'
+        }
+        
+        # O str(data_str) garante que funciona com pd.Timestamp ou string
+        partes = str(data_str).split('/')
+        
+        # Tentativa de converter se for um formato de data/hora completo do Pandas
+        if len(partes) < 3 and '-' in str(data_str):
+            # Tenta tratar como timestamp (ex: 2025-11-12 00:00:00)
+            data_obj = pd.to_datetime(data_str, errors='coerce')
+            if pd.isna(data_obj):
+                    return data_str # Retorna original se falhar
+            
+            mes_numero = data_obj.strftime('%m')
+            ano = data_obj.strftime('%Y')
+        else:
+            # Trata como string 'DD/MM/AAAA'
+            if len(partes) < 3:
+                return data_str 
+
+            mes_numero = partes[1]
+            ano = partes[2]
+        
+        mes_extenso = meses.get(mes_numero, mes_numero)
+        
+        return f"{mes_extenso}, {ano}"
+
+    except Exception:
+        return data_str
