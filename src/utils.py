@@ -9,7 +9,7 @@ import io
 from docx import Document
 import pandas as pd
 from docx.enum.table import WD_ALIGN_VERTICAL
-from docx.table import _Cell 
+import re
 
 # --- Funções auxiliares de formatação: ---
 
@@ -522,3 +522,61 @@ def formatar_data_capa(data_str):
 
     except Exception:
         return data_str
+    
+def parear_e_formatar_assinaturas(nomes_str, matriculas_str, cargo_fixo="Analista de Regulação"):
+    """
+    Divide as strings de nomes e matrículas pelo caractere ';' e as emparelha.
+    Retorna uma lista de tuplas formatadas: (nome, cargo, matricula_formatada).
+    """
+    nomes = [n.strip() for n in str(nomes_str).split(';') if n.strip()]
+    matriculas = [m.strip() for m in str(matriculas_str).split(';') if m.strip()]
+    
+    assinaturas_formatadas = []
+    
+    for i, nome in enumerate(nomes):
+        matricula_raw = matriculas[i] if i < len(matriculas) else ""
+        
+        if matricula_raw:
+            matricula_info = f"Matrícula nº {matricula_raw}"
+        else:
+            matricula_info = "" # Nenhuma matrícula
+            
+        assinaturas_formatadas.append((nome, cargo_fixo, matricula_info))
+        
+    return assinaturas_formatadas    
+
+# --- FUNÇÕES AUXILIARES DE DATA E EXTRAÇÃO DE CIDADE ---
+
+# --- FUNÇÃO AUXILIAR DE EXTRAÇÃO DE CIDADE ---
+
+def extrair_cidade(terminal_str):
+    """Extrai apenas o nome da cidade de uma string de terminal (ex: 'Terminal de Recife (TIP)')."""
+    if not isinstance(terminal_str, str):
+        return ""
+    # Remove prefixos comuns e o que estiver entre parênteses
+    cidade = re.sub(r'terminal d[eo]\s*', '', terminal_str, flags=re.IGNORECASE)
+    # Mantém o (TIP) se for o caso, removendo apenas outros parênteses
+    cidade = re.sub(r'\(TIP\)', ' (TIP)', cidade, flags=re.IGNORECASE).strip() 
+    cidade = re.sub(r'\s*\(.*\)', '', cidade).strip()
+    return cidade.capitalize() # Capitaliza para um formato mais limpo
+
+# --- FUNÇÃO AUXILIAR DE FILTRAGEM ---
+
+def padronizar_processo(id_fisc):
+    """
+    Converte o ID de Fiscalização (ex: 'CTR-04-2025') para o formato da planilha (ex: 'CTR 04/2025').
+    O filtro é feito pela coluna 'PROCESSO' do Excel.
+    """
+    if not isinstance(id_fisc, str):
+        return ""
+        
+    # Remove hífens e converte para maiúsculas
+    processo_formatado = id_fisc.upper().replace('-', ' ')
+    
+    # Adiciona a barra (/) no formato XX XX/XXXX
+    partes = processo_formatado.split()
+    if len(partes) == 3:
+        # Ex: ['CTR', '04', '2025'] -> 'CTR 04/2025'
+        return f"{partes[0]} {partes[1]}/{partes[2]}"
+        
+    return processo_formatado
