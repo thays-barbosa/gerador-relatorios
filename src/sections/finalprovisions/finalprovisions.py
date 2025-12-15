@@ -53,21 +53,12 @@ def gerar_secao_determinacoes_finais(doc: Document, row):
     
     # Conteúdo (Não Negrito)
     par3.add_run(
-        " para resolutividade das 9 (nove) NC constatadas, nos prazos estabelecidos, conforme disposto no "
+        " para resolutividade das "
     )
     # NC (nove) em negrito conforme a imagem
-    par3.add_run("9 (nove) NC").bold = True 
-    
-    par3.add_run(
-        " constatadas, nos prazos estabelecidos, conforme disposto no "
-    )
-    # Quadro 1 em negrito conforme a imagem
-    par3.add_run("Quadro 1").bold = True 
-    
-    par3.add_run(", na coluna denominada ")
-    # Determinações em negrito conforme a imagem
-    par3.add_run("Determinações").bold = True
-    par3.add_run(".")
-    
+    par3.add_run("NC ").bold = True 
+
+    par3.add_run("constatadas, nos prazos estabelecidos, conforme disposto no Quadro 1, na coluna denominada Determinações. ")
+
     # Adiciona um espaço final
     doc.add_paragraph()

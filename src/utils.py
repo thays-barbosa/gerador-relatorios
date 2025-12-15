@@ -300,14 +300,30 @@ def adicionar_apendice_fotos(doc, caminho_base_fotos, id_fiscalizacao, caminho_p
     Gera o Apêndice 1 com as fotos dinâmicas, seguindo o layout 2x2.
     """
     # 1. Busca e prepara as legendas
-    # Assumindo que o nome da aba foi corrigido para "Não-conformidades " (com espaço)
-    df_legendas = pd.read_excel(caminho_planilha_legendas, sheet_name="Não-conformidades ")
     
+    # 🚨 PONTO CRÍTICO: Tenta carregar a aba. Se falhar no nome com espaço, tenta sem.
+    aba_nc = "Não-conformidades " 
+    try:
+        df_legendas = pd.read_excel(caminho_planilha_legendas, sheet_name=aba_nc)
+    except ValueError:
+        try:
+            df_legendas = pd.read_excel(caminho_planilha_legendas, sheet_name=aba_nc.strip())
+        except Exception:
+             adicionar_paragrafo_justificado(doc, f"ERRO: Não foi possível encontrar a aba de legendas ('{aba_nc}' ou '{aba_nc.strip()}').")
+             return
+
     # Filtra a linha correta pelo ID
     # Limpa espaços nas colunas para evitar KeyError
     df_legendas.columns = df_legendas.columns.str.strip() 
-    linha_legenda = df_legendas[df_legendas['ID da Fiscalização'] == id_fiscalizacao]
     
+    # 🚨 CORREÇÃO DE TIPAGEM/FORMATO: Garante que ambos são strings limpas para a comparação
+    id_fisc_limpo = str(id_fiscalizacao).strip()
+    
+    # 2. Filtragem robusta: Converte a coluna para string limpa antes de comparar
+    linha_legenda = df_legendas[
+        df_legendas['ID da Fiscalização'].astype(str).str.strip() == id_fisc_limpo
+    ]
+     
     if linha_legenda.empty:
         adicionar_paragrafo_justificado(doc, f"AVISO: Legendas não encontradas na planilha para o ID: {id_fiscalizacao}. As fotos não serão legendadas.")
         legendas = [] 
@@ -316,7 +332,7 @@ def adicionar_apendice_fotos(doc, caminho_base_fotos, id_fiscalizacao, caminho_p
         texto_legendas = str(linha_legenda['Legenda da Foto'].iloc[0]) 
         legendas = [l.strip() for l in texto_legendas.split(';') if l.strip()]
 
-    # 2. Busca e prepara os caminhos das fotos
+    # 3. Busca e prepara os caminhos das fotos
     # Obtém a lista de arquivos de imagem na pasta especificada
     try:
         arquivos_fotos = sorted([
@@ -332,39 +348,39 @@ def adicionar_apendice_fotos(doc, caminho_base_fotos, id_fiscalizacao, caminho_p
         adicionar_paragrafo_justificado(doc, f"AVISO: A subpasta procurada está vazia, Seu Apêndice não terá fotos.")
         return
 
-    # 3. Cria a estrutura da tabela (layout de 2x2)
-    
+    # 4. Cria a estrutura da tabela (layout de 2x2)
+
     num_fotos = len(arquivos_fotos)
     # Linhas: 1 linha de foto + 1 linha de legenda para cada 2 fotos
     num_linhas_tabela = ((num_fotos + 1) // 2) * 2 
-    
+
     tabela = doc.add_table(rows=num_linhas_tabela, cols=2)
     tabela.autofit = False
     tabela.style = 'Table Grid'
-    
+
     # Define a largura das colunas
     largura_coluna_cm = 8.5 
     tabela.columns[0].width = Cm(largura_coluna_cm)
     tabela.columns[1].width = Cm(largura_coluna_cm)
-    
-    # 4. Popula a tabela
+
+    # 5. Popula a tabela
     for i in range(num_linhas_tabela // 2): # Itera sobre os "pares" de linhas (Foto + Legenda)
         linha_foto_idx = i * 2
         linha_legenda_idx = i * 2 + 1 
-        
+
         for j in range(2): # Coluna 0 e Coluna 1
             foto_idx = i * 2 + j
-            
+
             if foto_idx < num_fotos:
                 caminho_foto = arquivos_fotos[foto_idx]
-                
+
                 # --- A. Célula da Foto ---
                 celula_foto = tabela.cell(linha_foto_idx, j)
                 adicionar_imagem_na_celula(celula_foto, caminho_foto, largura_max_cm=7.5) 
 
                 # --- B. Célula da Legenda ---
                 celula_legenda = tabela.cell(linha_legenda_idx, j)
-                
+
                 celula_legenda.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 par_legenda = celula_legenda.paragraphs[0] if celula_legenda.paragraphs else celula_legenda.add_paragraph()
                 remover_espacamento_paragrafo(par_legenda) # Compactação
@@ -372,24 +388,23 @@ def adicionar_apendice_fotos(doc, caminho_base_fotos, id_fiscalizacao, caminho_p
 
                 # Pega a legenda correta
                 texto_legenda = legendas[foto_idx] if foto_idx < len(legendas) else f"Legenda {foto_idx + 1} não fornecida na planilha."
-                
+
                 # Adiciona e formata o texto da legenda
                 run_legenda = par_legenda.add_run(texto_legenda)
                 aplicar_estilo_texto(run_legenda, tamanho=10, fonte="Arial", cor_rgb=(90, 90, 90))
-                
+
             else:
                 # Preenche células vazias
                 celula_foto_vazia = tabela.cell(linha_foto_idx, j)
                 celula_legenda_vazia = tabela.cell(linha_legenda_idx, j)
-                
+
                 par_foto_vazia = celula_foto_vazia.add_paragraph("")
                 remover_espacamento_paragrafo(par_foto_vazia)
                 par_foto_vazia.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
+
                 par_legenda_vazia = celula_legenda_vazia.add_paragraph("")
                 remover_espacamento_paragrafo(par_legenda_vazia)
                 par_legenda_vazia.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
 
 # --- FUNÇÃO DE GERAÇÃO DA TABELA DE ABREVIATURAS (CORRIGIDA) ---
 

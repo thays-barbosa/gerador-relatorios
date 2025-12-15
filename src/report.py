@@ -215,7 +215,7 @@ def gerar_relatorio():
             doc, 
             row, 
             caminho_planilha_legendas=CAMINHO_PLANILHA, 
-            caminho_base_fotos=caminho_base_fotos 
+            caminho_base_fotos=caminho_base_fotos,
         )
 
         # --- SALVAMENTO ---
