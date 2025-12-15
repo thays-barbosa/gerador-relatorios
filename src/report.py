@@ -1,5 +1,4 @@
-# report.py - COMPLETO E CORRIGIDO PARA FILTRO POR Nº PROCESSO
-
+# report.py - COMPLETO E CORRIGIDO
 from docx import Document
 from docx2pdf import convert
 from docx.shared import Inches
@@ -32,18 +31,17 @@ from utils import (
     arquivo_em_uso,
 )
 
-
 def aguardar_e_encerrar(mensagem):
     """Exibe uma mensagem de erro e espera o usuário pressionar Enter para encerrar."""
     print(f"\n❌ ERRO: {mensagem}")
     input("Aperte Enter para encerrar...")
     sys.exit(1)
 
-
 def gerar_relatorio():
     """
     Gera o relatório completo (docx + pdf) com base nos dados da fiscalização.
     """
+    # Silencia apenas avisos de cópia, mantendo outros alertas importantes
     warnings.filterwarnings("ignore", category=pd.errors.SettingWithCopyWarning) 
 
     if getattr(sys, "frozen", False):
@@ -54,7 +52,6 @@ def gerar_relatorio():
     FOTOS_DIR = os.path.join(BASE_DIR, "assets")
     RELATORIOS_DIR = os.path.join(BASE_DIR, "reports")
     CAMINHO_PLANILHA = os.path.join(BASE_DIR, "planilha_fiscalizacao.xlsx")
-
     CAMINHO_PLANILHA_NCS = os.path.join(BASE_DIR, "levantamento de NCS - SOCICAM.xlsx")
 
     COLUNA_STATUS = "Relatório Gerado" 
@@ -63,30 +60,20 @@ def gerar_relatorio():
     os.makedirs(FOTOS_DIR, exist_ok=True)
 
     if arquivo_em_uso(CAMINHO_PLANILHA):
-        print("⚠️ A planilha principal está em uso. Feche-a antes de executar o script.")
-        exit(1)
+        aguardar_e_encerrar("A planilha principal está em uso. Feche-a antes de executar.")
 
     if arquivo_em_uso(CAMINHO_PLANILHA_NCS):
-        print("⚠️ A planilha de Não-Conformidades está em uso. Feche-a antes de executar o script.")
-        exit(1)
-
+        aguardar_e_encerrar("A planilha de Não-Conformidades está em uso. Feche-a antes de executar.")
 
     DIRETORIO_PAI_FOTOS = FOTOS_DIR 
 
- # --- BLOCO DE ENTRADA E VALIDAÇÃO DE CAMINHO ---
     print("\n--- Configuração do Apêndice Fotográfico ---")
-
-    pasta_principal_fotos = "" 
-    subpasta_fotos = ""
-    caminho_base_fotos = ""
-
     while True:
         pasta_principal_input = input("➡️ Digite o nome da PASTA (ex: CTR-02-2024): ").strip()
         pasta_principal_fotos = pasta_principal_input.upper() 
         caminho_pasta_principal = os.path.join(DIRETORIO_PAI_FOTOS, pasta_principal_fotos)
-
         if not os.path.isdir(caminho_pasta_principal):
-            aguardar_e_encerrar("A Pasta procurada não existe, por favor, cheque seus documentos.")
+            aguardar_e_encerrar("A Pasta procurada não existe.")
         else:
             break
 
@@ -94,26 +81,20 @@ def gerar_relatorio():
         subpasta_input = input("➡️ Digite o nome da SUBPASTA (ex: F0): ").strip()
         subpasta_fotos = subpasta_input.upper()
         caminho_base_fotos = os.path.join(caminho_pasta_principal, subpasta_fotos)
-
         if not os.path.isdir(caminho_base_fotos):
-            aguardar_e_encerrar("A subpasta procurada não existe, por favor, cheque seus documentos.")
+            aguardar_e_encerrar("A subpasta procurada não existe.")
         else:
             break
 
     print("------------------------------------------") 
 
-    # --- NOVO BLOCO DE IDENTIFICAÇÃO DO PROCESSO ALVO ---
-
-    # 🚨 ETAPA 1: DETERMINAÇÃO DO ANO DA ABA (Para a planilha de NCS)
+    # --- IDENTIFICAÇÃO DO PROCESSO ---
     match_ano = re.search(r'(\d{4})$', pasta_principal_fotos)
     if not match_ano:
-        aguardar_e_encerrar(f"Não foi possível extrair o ano do nome da pasta: {pasta_principal_fotos}")
-
+        aguardar_e_encerrar(f"Não foi possível extrair o ano de: {pasta_principal_fotos}")
     ano_aba_ncs = match_ano.group(1)
 
-    # 🚨 ETAPA 2: DETERMINAÇÃO DO PROCESSO ALVO NO FORMATO DO EXCEL 
     match_processo = re.match(r'(CTR)-(\d+)-(\d{4})$', pasta_principal_fotos.strip())
-
     if match_processo:
         id_processo_alvo = f"{match_processo.group(1)} {match_processo.group(2)}/{match_processo.group(3)}"
         processo_numero_alvo = f"{match_processo.group(2)}/{match_processo.group(3)}"
@@ -123,126 +104,87 @@ def gerar_relatorio():
             id_processo_alvo = f"{partes[0].upper()} {partes[1]}/{partes[2]}"
             processo_numero_alvo = f"{partes[1]}/{partes[2]}"
         else:
-            aguardar_e_encerrar(f"O nome da pasta ('{pasta_principal_fotos}') não pôde ser convertido para o formato PROCESSO ('CTR XX/YYYY').")
+            aguardar_e_encerrar(f"Formato de pasta inválido: {pasta_principal_fotos}")
 
-
-    # --- Lendo planilhas e limpando nomes de colunas por segurança ---
- 
-# 1. PLANILHA PRINCIPAL (Aba Fiscalizações)
+    # --- LEITURA DAS PLANILHAS ---
     try:
         fiscalizacoes_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Fiscalizações")
         fiscalizacoes_df.columns = fiscalizacoes_df.columns.str.strip() 
-
         if 'Nº Processo' not in fiscalizacoes_df.columns:
-         aguardar_e_encerrar("Coluna 'Nº Processo' não encontrada na aba 'Fiscalizações' do arquivo principal. Verifique o cabeçalho.")
-
+            aguardar_e_encerrar("Coluna 'Nº Processo' não encontrada.")
         fiscalizacoes_df['Nº Processo Limpo'] = fiscalizacoes_df['Nº Processo'].astype(str).str.strip()
+    except Exception as e:
+        aguardar_e_encerrar(f"Erro ao ler planilha principal: {e}")
 
-    except FileNotFoundError:
-        aguardar_e_encerrar(f"Planilha principal não encontrada: {CAMINHO_PLANILHA}")
-
-    # 2. PLANILHA DE NÃO-CONFORMIDADES (Arquivo separado, aba dinâmica)
     try:
-        nao_conformidades_df = pd.read_excel(
-            CAMINHO_PLANILHA_NCS, sheet_name=ano_aba_ncs
-        ).copy()
+        nao_conformidades_df = pd.read_excel(CAMINHO_PLANILHA_NCS, sheet_name=ano_aba_ncs).copy()
         nao_conformidades_df.columns = nao_conformidades_df.columns.str.strip()
- 
-        if 'PROCESSO' not in nao_conformidades_df.columns:
-            aguardar_e_encerrar("Coluna 'PROCESSO' não encontrada na aba anual de Não-Conformidades. Verifique o cabeçalho.")
-
         nao_conformidades_df['PROCESSO_LIMPO'] = nao_conformidades_df['PROCESSO'].astype(str).str.strip()
-
         print(f"✅ Dados de Não-Conformidades carregados da aba '{ano_aba_ncs}'")
-    except FileNotFoundError:
-        aguardar_e_encerrar(f"Planilha de Não-Conformidades não encontrada: {CAMINHO_PLANILHA_NCS}")
-    except ValueError:
-        aguardar_e_encerrar(f"A aba '{ano_aba_ncs}' não foi encontrada na planilha de Não-Conformidades. Verifique se o nome da aba está correto.")
+    except Exception as e:
+        aguardar_e_encerrar(f"Erro ao ler planilha de NCs: {e}")
 
-
-    # --- LÓGICA DE FILTRAGEM DO RELATÓRIO ALVO ---
-
+    # --- CORREÇÃO DO FUTUREWARNING (STATUS) ---
     if COLUNA_STATUS not in fiscalizacoes_df.columns:
         fiscalizacoes_df[COLUNA_STATUS] = False
+    
+    # Garantimos que a coluna é booleana antes de qualquer atribuição via .loc
+    fiscalizacoes_df[COLUNA_STATUS] = fiscalizacoes_df[COLUNA_STATUS].fillna(False).astype(bool)
 
-    # CORREÇÃO FINAL: Garante que a coluna seja estritamente booleana, evitando o FutureWarning.
-    fiscalizacoes_df.loc[:, COLUNA_STATUS] = (
-        fiscalizacoes_df[COLUNA_STATUS].fillna(False).astype(bool)
-    )
-
-    # BUSCA PELA COLUNA 'Nº Processo Limpo'
     relatorios_a_gerar = fiscalizacoes_df[
         (fiscalizacoes_df['Nº Processo Limpo'] == processo_numero_alvo) & 
-        (~fiscalizacoes_df[COLUNA_STATUS])
+        (fiscalizacoes_df[COLUNA_STATUS] == False)
     ].copy()
 
     if relatorios_a_gerar.empty:
-        print(f"✅ Nenhum relatório pendente encontrado para o PROCESSO: {id_processo_alvo}.")
-
-        if any(fiscalizacoes_df['Nº Processo Limpo'] == processo_numero_alvo):
-            print("⚠️ Este relatório já foi marcado como 'Gerado'.")
-
+        print(f"✅ Nenhum relatório pendente para o PROCESSO: {id_processo_alvo}.")
         return
 
-    # Iteração (deve ser apenas uma linha)
+    # --- GERAÇÃO DOS RELATÓRIOS ---
     for idx in tqdm(relatorios_a_gerar.index, desc="Gerando relatórios"):
         row = fiscalizacoes_df.loc[idx].copy()
-
-        # INJEÇÃO CRÍTICA: Adiciona a chave 'PROCESSO' completa na linha do relatório
         row['PROCESSO'] = id_processo_alvo 
-
-        #O ID usado para o nome do arquivo é o numérico
         id_fisc_numerico = row["ID da Fiscalização"] 
  
         doc = Document()
-
-        # ... (Geração das seções) ...
-
         gerar_capa(doc, BASE_DIR, row)
         gerar_secao_abreviaturas(doc, CAMINHO_PLANILHA) 
         doc.add_section(WD_SECTION.NEW_PAGE) 
         gerar_secao_introducao(doc)
         gerar_secao_objetivo(doc,row)
         gerar_secao_metodologia(doc, row)
-
-        # Passa a linha com a chave 'PROCESSO' e o df de NCs
         gerar_secao_fiscalizacao(doc, row, nao_conformidades_df) 
-
         gerar_secao_determinacoes_finais(doc, row)
         gerar_secao_recomendacoes(doc,row)
+        gerar_secao_conclusoes(doc, row, CAMINHO_PLANILHA, caminho_base_fotos)
 
-        gerar_secao_conclusoes(
-            doc, 
-            row, 
-            caminho_planilha_legendas=CAMINHO_PLANILHA, 
-            caminho_base_fotos=caminho_base_fotos,
-        )
-
-        # --- SALVAMENTO ---
         nome_arquivo = f"relatorio_{id_fisc_numerico}" 
         caminho_docx = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.docx")
         caminho_pdf = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.pdf")
 
         doc.save(caminho_docx)
         convert(caminho_docx, caminho_pdf)
+        
+        # Atribuição segura agora que o dtype está correto
         fiscalizacoes_df.loc[idx, COLUNA_STATUS] = True
 
-    # 🔹 Garantir que a coluna Data seja salva no formato dd/mm/aaaa
+    # --- CORREÇÃO DO FUTUREWARNING (DATA) ---
     if "Data" in fiscalizacoes_df.columns:
-        fiscalizacoes_df.loc[:, "Data"] = pd.to_datetime(
+        # Converte para datetime e depois para string, garantindo o tipo object
+        fiscalizacoes_df["Data"] = pd.to_datetime(
             fiscalizacoes_df["Data"], errors="coerce"
         ).dt.strftime("%d/%m/%Y")
 
+    # --- SALVAMENTO FINAL ---
     if not arquivo_em_uso(CAMINHO_PLANILHA):
         with pd.ExcelWriter(
             CAMINHO_PLANILHA, engine="openpyxl", mode="a", if_sheet_exists="replace"
         ) as writer:
-            # Remove a coluna temporária 'Nº Processo Limpo' antes de salvar
             cols_to_drop = ['Nº Processo Limpo']
-            fiscalizacoes_df.drop(columns=[col for col in cols_to_drop if col in fiscalizacoes_df.columns], errors='ignore').to_excel(writer, sheet_name="Fiscalizações", index=False) 
+            df_final = fiscalizacoes_df.drop(columns=cols_to_drop, errors='ignore')
+            df_final.to_excel(writer, sheet_name="Fiscalizações", index=False) 
 
         ajustar_largura_colunas(CAMINHO_PLANILHA)
 
     print("🎉 Relatório gerado e planilha principal atualizada com sucesso.")
-
     return caminho_docx, caminho_pdf
