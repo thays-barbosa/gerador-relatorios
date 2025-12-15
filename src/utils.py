@@ -463,7 +463,7 @@ def adicionar_tabela_abreviaturas(doc, df_abreviaturas):
         remover_espacamento_paragrafo(par_sigla_data) # Compactação
         par_sigla_data.text = ""
         run_sigla_data = par_sigla_data.add_run(str(row['Sigla']))
-        run_sigla_data.bold = True 
+        run_sigla_data.bold = False
         par_sigla_data.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
         # Definição (Esquerda)
