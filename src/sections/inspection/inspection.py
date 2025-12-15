@@ -36,6 +36,8 @@ def gerar_secao_fiscalizacao(doc: Document, row, nao_conformidades_df):
     # 1. Título Principal
     adicionar_titulo_secao(doc, "4. FISCALIZAÇÃO")
 
+    doc.add_paragraph() 
+
     # 2. Preparação dos dados dinâmicos (Equipe e Locais) - Sem alterações aqui
 
     # A. Dados da Equipe (row = aba Fiscalizações)

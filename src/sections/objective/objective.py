@@ -9,6 +9,7 @@ from typing import List, Tuple
 from utils import adicionar_titulo_secao, adicionar_paragrafo_justificado, adicionar_tabela_informacoes
 
 
+
 def gerar_secao_objetivo(doc: Document, row: pd.Series):
     """
     Gera as seções 2. OBJETIVO e 3. INFORMAÇÕES GERAIS,
@@ -68,6 +69,8 @@ def gerar_secao_objetivo(doc: Document, row: pd.Series):
     # --- 3. GERAÇÃO DO TEXTO E TABELA NO DOCUMENTO ---
     
     adicionar_titulo_secao(doc, "2. OBJETIVO")
+
+    doc.add_paragraph() 
 
     # Texto Justificado da seção
     par = doc.add_paragraph()

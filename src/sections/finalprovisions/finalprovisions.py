@@ -14,6 +14,8 @@ def gerar_secao_determinacoes_finais(doc: Document, row):
 
     # 1. Título Principal
     adicionar_titulo_secao(doc, "5. DETERMINAÇÕES GERAIS")
+
+    doc.add_paragraph() 
   
     # 2. Parágrafo Introdutório (Texto Simples, Justificado)
     texto1 = (

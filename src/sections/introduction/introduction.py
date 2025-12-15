@@ -5,6 +5,8 @@ from utils import adicionar_titulo_secao
 def gerar_secao_introducao(doc: Document):
     adicionar_titulo_secao(doc, "1. INTRODUÇÃO")
 
+    doc.add_paragraph() 
+
     par = doc.add_paragraph()
     par.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     par.add_run(

@@ -9,6 +9,8 @@ import io
 from docx import Document
 import pandas as pd
 from docx.enum.table import WD_ALIGN_VERTICAL
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from datetime import datetime
 import re
 
 # --- Funções auxiliares de formatação: ---
@@ -595,3 +597,114 @@ def padronizar_processo(id_fisc):
         return f"{partes[0]} {partes[1]}/{partes[2]}"
         
     return processo_formatado
+
+def adicionar_assinaturas_formatadas(
+    doc,
+    analistas_fixos,
+    coordenador_nome_fixo,
+    cidade_relatorio="Recife"
+):
+    """
+    Adiciona a seção de assinaturas com layout VERTICAL (um bloco abaixo do outro)
+    e alinhamento de texto de controle à esquerda (Data e Ciente).
+    """
+    
+    # 1. PARÁGRAFO DE DATA (Alinhado à esquerda)
+    
+    data_par = doc.add_paragraph()
+    remover_espacamento_paragrafo(data_par)
+    
+    # Espaçamento para garantir que comece no topo da página
+    data_par.paragraph_format.space_before = Pt(36) 
+    
+    # ALINHAMENTO À ESQUERDA CORRIGIDO
+    data_par.alignment = WD_ALIGN_PARAGRAPH.LEFT 
+    data_par.add_run(f"{cidade_relatorio}, data da assinatura eletrônica.")
+    data_par.runs[0].font.size = Pt(12)
+    
+    # Espaço entre Data e primeiro Analista
+    doc.add_paragraph().paragraph_format.space_after = Pt(72)
+
+
+    # --- BLOCOS DE ASSINATURA DOS ANALISTAS (UM ABAIXO DO OUTRO) ---
+    
+    def _adicionar_bloco_assinatura(doc, nome, cargo, matricula):
+        
+        # Nome (Negrito, 11pt)
+        par_nome = doc.add_paragraph()
+        remover_espacamento_paragrafo(par_nome)
+        par_nome.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        par_nome.add_run(nome).bold = True
+        par_nome.runs[0].font.size = Pt(11)
+
+        # Cargo (11pt)
+        par_cargo = doc.add_paragraph(cargo)
+        remover_espacamento_paragrafo(par_cargo)
+        par_cargo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        par_cargo.runs[0].font.size = Pt(11)
+        
+        # Matrícula (11pt)
+        par_mat = doc.add_paragraph(matricula)
+        remover_espacamento_paragrafo(par_mat)
+        par_mat.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        par_mat.runs[0].font.size = Pt(11)
+
+        # Espaçamento entre os blocos de assinatura
+        doc.add_paragraph().paragraph_format.space_after = Pt(36)
+        
+    # Adiciona o primeiro analista (Alcides)
+    _adicionar_bloco_assinatura(
+        doc,
+        analistas_fixos[0][0], 
+        analistas_fixos[0][1], 
+        analistas_fixos[0][2]
+    )
+    
+    # Adiciona o segundo analista (Enildo)
+    _adicionar_bloco_assinatura(
+        doc,
+        analistas_fixos[1][0], 
+        analistas_fixos[1][1], 
+        analistas_fixos[1][2]
+    )
+
+
+    # 4. BLOCO DO COORDENADOR (Ciente e de acordo)
+    
+    # Parágrafo "Ciente e de acordo." (Alinhado à esquerda)
+    par_ciente = doc.add_paragraph()
+    remover_espacamento_paragrafo(par_ciente)
+    # Espaço após o bloco do último analista
+    par_ciente.paragraph_format.space_before = Pt(72) 
+    
+    # ALINHAMENTO À ESQUERDA CORRIGIDO
+    par_ciente.alignment = WD_ALIGN_PARAGRAPH.LEFT 
+    run_ciente = par_ciente.add_run("Ciente e de acordo.")
+    run_ciente.font.size = Pt(11)
+    run_ciente.bold = False
+    
+    # Espaço entre o "Ciente" e o bloco da Coordenadora
+    doc.add_paragraph().paragraph_format.space_after = Pt(72)
+
+
+    # --- BLOCO DE ASSINATURA DA COORDENADORA (Centralizado) ---
+
+    # Nome (Negrito, 11pt)
+    par_nome_coord = doc.add_paragraph()
+    remover_espacamento_paragrafo(par_nome_coord)
+    par_nome_coord.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    par_nome_coord.add_run(coordenador_nome_fixo).bold = True
+    par_nome_coord.runs[0].font.size = Pt(11)
+
+    # Cargo (Fixo: Coordenadora de Transportes e Rodovias, 11pt)
+    par_cargo_coord = doc.add_paragraph("Coordenadora de Transportes e Rodovias")
+    remover_espacamento_paragrafo(par_cargo_coord)
+    par_cargo_coord.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    par_cargo_coord.runs[0].font.size = Pt(11) 
+    
+    # Matrícula (Fixa: Matrícula nº 209640/01, 11pt)
+    matricula_coord = "Matrícula nº 209640/01" 
+    par_mat_coord = doc.add_paragraph(matricula_coord)
+    remover_espacamento_paragrafo(par_mat_coord)
+    par_mat_coord.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    par_mat_coord.runs[0].font.size = Pt(11)

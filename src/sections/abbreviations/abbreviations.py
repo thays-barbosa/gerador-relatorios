@@ -3,9 +3,10 @@
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 # Importa a função de utils, mas sem WD_PARAGRAPH_ALIGNMENT que está em docx.enum.text
-from utils import adicionar_titulo_secao, adicionar_tabela_abreviaturas 
+from utils import adicionar_titulo_secao, adicionar_tabela_abreviaturas,remover_espacamento_paragrafo 
 import pandas as pd
 import os
+from docx.shared import  Pt 
 
 # Remove a definição de CAMINHO_PLANILHA aqui, pois ele virá como argumento
 
@@ -24,8 +25,25 @@ def gerar_secao_abreviaturas(doc: Document, caminho_completo_planilha):
     # doc.add_paragraph("LISTA DE ABREVIATURAS E SIGLAS", style='Heading 1').alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     # Se você usa a função utilitária para títulos numerados:
-    adicionar_titulo_secao(doc, "LISTA DE ABREVIATURAS E SIGLAS") # Assumindo título não numerado na Etapa 2
     
+    if len(doc.paragraphs) > 0 and doc.paragraphs[0].text == '':
+        par_titulo = doc.paragraphs[0]
+    else:
+        par_titulo = doc.add_paragraph() 
+        
+    remover_espacamento_paragrafo(par_titulo) 
+    par_titulo.paragraph_format.line_spacing_rule = None
+    par_titulo.paragraph_format.line_spacing = None
+    
+    par_titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    par_titulo.text = ''
+    
+    run_titulo = par_titulo.add_run("RELATÓRIO DE FISCALIZAÇÃO")
+    run_titulo.bold = True
+    run_titulo.font.size = Pt(12) 
+
+    doc.add_paragraph() 
+
     try:
         # Lê a aba 'Abreviaturas' - *NOTE BEM:* Se o nome da aba for "Abreviaturas e Siglas", 
         # mude o sheet_name abaixo!
