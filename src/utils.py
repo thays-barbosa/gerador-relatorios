@@ -13,7 +13,6 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from datetime import datetime
 import re
 
-# --- 1. NOVAS FUNÇÕES PARA O SUMÁRIO (INDISPENSÁVEIS) ---
 
 def adicionar_titulo_secao(doc, texto, nivel=1):
     """
@@ -35,8 +34,6 @@ def forcar_atualizacao_campos(doc):
     update_fields = OxmlElement('w:updateFields')
     update_fields.set(qn('w:val'), 'true')
     element.append(update_fields)
-
-# --- 2. FUNÇÕES DE FORMATAÇÃO (SUAS ORIGINAIS INTEGRALMENTE) ---
 
 def remover_espacamento_paragrafo(paragrafo):
     paragrafo_format = paragrafo.paragraph_format
@@ -102,7 +99,6 @@ def adicionar_legenda_formatada(doc, texto):
     par.alignment = WD_ALIGN_PARAGRAPH.CENTER
     aplicar_borda_paragrafo(par)
 
-# --- 3. IMAGENS E APÊNDICE FOTOGRÁFICO (SUAS ORIGINAIS) ---
 
 def processar_imagem_para_relatorio(caminho_imagem, largura_max=1024, qualidade=80):
     img = Image.open(caminho_imagem)
@@ -168,8 +164,6 @@ def adicionar_apendice_fotos(doc, caminho_base_fotos, id_fiscalizacao, caminho_p
                 txt = legendas[foto_idx] if foto_idx < len(legendas) else f"Foto {foto_idx+1}"
                 aplicar_estilo_texto(p_leg.add_run(txt), tamanho=10, cor_rgb=(90, 90, 90))
 
-# --- 4. TABELAS (SUAS ORIGINAIS INTEGRALMENTE) ---
-
 def aplicar_fundo_cinza(celula):
     shading_elm = OxmlElement('w:shd')
     shading_elm.set(qn('w:val'), 'clear')
@@ -216,7 +210,6 @@ def adicionar_tabela_abreviaturas(doc, df_abreviaturas):
         p0 = c0.paragraphs[0]; remover_espacamento_paragrafo(p0); p0.add_run(str(row['Sigla'])); p0.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p1 = c1.paragraphs[0]; remover_espacamento_paragrafo(p1); p1.add_run(str(row['Definição']))
 
-# --- 5. LOGICA EXCEL E DATA (SUAS ORIGINAIS INTEGRALMENTE) ---
 
 def ajustar_largura_colunas(caminho_planilha):
     wb = load_workbook(caminho_planilha)
@@ -264,7 +257,6 @@ def padronizar_processo(id_fisc):
     partes = id_fisc.upper().replace('-', ' ').split()
     return f"{partes[0]} {partes[1]}/{partes[2]}" if len(partes) == 3 else id_fisc
 
-# --- 6. ASSINATURAS (SUA LÓGICA VERTICAL ORIGINAL) ---
 
 def adicionar_assinaturas_formatadas(doc, analistas_fixos, coordenador_nome_fixo, cidade_relatorio="Recife"):
     data_par = doc.add_paragraph()

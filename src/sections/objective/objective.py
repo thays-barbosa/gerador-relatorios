@@ -1,11 +1,8 @@
-# sections/objective/objective.py
-# Seção 2. OBJETIVO e 3. INFORMAÇÕES GERAIS (Dinâmico)
-
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import pandas as pd
 from typing import List, Tuple
-# Importa as funções auxiliares do seu arquivo 'utils.py'
+
 from utils import adicionar_titulo_secao, adicionar_paragrafo_justificado, adicionar_tabela_informacoes
 
 
@@ -20,9 +17,6 @@ def gerar_secao_objetivo(doc: Document, row: pd.Series):
         row (pd.Series): A linha de dados (registro) da fiscalização atual no Pandas.
     """
 
-    # --- 1. EXTRAÇÃO DE DADOS DINÂMICOS DA PLANILHA (row) ---
-    
-    # OBS: O nome das colunas deve ser idêntico ao cabeçalho da sua planilha.
     try:
         # Puxa os dados da linha de fiscalização atual
         # O 'str()' é usado para garantir que o Pandas.Series vire uma string.
@@ -37,9 +31,6 @@ def gerar_secao_objetivo(doc: Document, row: pd.Series):
         print(f"ALERTA: Erro ao extrair dados da linha: {e}")
         responsavel_fiscalizacao = "ERRO INTERNO"
         periodo_fiscalizacao = "ERRO INTERNO"
-
-
-    # --- 2. DEFINIÇÃO DA TABELA (DADOS ESTÁTICOS + DADOS DINÂMICOS) ---
 
     DADOS_INFORMACOES_GERAIS: List[Tuple[str, str]] = [
         ("3.1 DO TITULAR", ""),
@@ -56,23 +47,19 @@ def gerar_secao_objetivo(doc: Document, row: pd.Series):
         ("Diretor Presidente:", "CARLOS PORTO FILHO"),
         ("Endereço:", "Avenida Conselheiro Rosa e Silva, 975, Aflitos, Recife/PE, CEP: 52.050-020."),
         ("Estacionamento:", "Rua do Futuro, 150, Aflitos, Recife/PE."),
-        
-        # <<<<<< DADOS DINÂMICOS INSERIDOS AQUI >>>>>>
+ 
         ("Responsáveis pela fiscalização:", responsavel_fiscalizacao),
         ("Período da Fiscalização:", periodo_fiscalizacao),
-        # <<<<<< FIM DOS DADOS DINÂMICOS >>>>>>
+   
 
         ("Tipo de Fiscalização:", "Direta e periódica."),
     ]
 
-
-    # --- 3. GERAÇÃO DO TEXTO E TABELA NO DOCUMENTO ---
     
     adicionar_titulo_secao(doc, "2. OBJETIVO")
 
     doc.add_paragraph() 
 
-    # Texto Justificado da seção
     par = doc.add_paragraph()
     par.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     par.add_run(
@@ -86,6 +73,6 @@ def gerar_secao_objetivo(doc: Document, row: pd.Series):
     )
 
     doc.add_paragraph()
-    # Adiciona a tabela com os dados dinâmicos e estáticos
+   
     adicionar_tabela_informacoes(doc, DADOS_INFORMACOES_GERAIS)
     doc.add_paragraph()

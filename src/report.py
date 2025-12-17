@@ -1,4 +1,3 @@
-# report.py - ATUALIZADO COM SUMÁRIO E CAMPOS AUTOMÁTICOS
 from docx import Document
 from docx2pdf import convert
 from docx.shared import Inches
@@ -11,24 +10,22 @@ import os
 import re 
 import warnings
 
-# Importações das seções
 from sections.introduction.introduction import gerar_secao_introducao
 from sections.objective.objective import gerar_secao_objetivo
 from sections.recommendations.recommendations import gerar_secao_recomendacoes
 from sections.methodology.methodology import gerar_secao_metodologia
 from sections.abbreviations.abbreviations import gerar_secao_abreviaturas
 from sections.cover.cover import gerar_capa 
-from sections.summary.summary import inserir_quebra_e_sumario # Importação do novo módulo
+from sections.summary.summary import inserir_quebra_e_sumario 
 from sections.conclusions.conclusions import gerar_secao_conclusoes
 from sections.inspection.inspection import gerar_secao_fiscalizacao
 from sections.finalprovisions.finalprovisions import gerar_secao_determinacoes_finais
 
-# Importações de utilitários
 from utils import (
     adicionar_texto_centralizado,
     ajustar_largura_colunas,
     arquivo_em_uso,
-    forcar_atualizacao_campos  # Nova função do seu utils
+    forcar_atualizacao_campos 
 )
 
 def aguardar_e_encerrar(mensagem):
@@ -64,7 +61,6 @@ def gerar_relatorio():
     if arquivo_em_uso(CAMINHO_PLANILHA_NCS):
         aguardar_e_encerrar("A planilha de Não-Conformidades está em uso. Feche-a antes de executar.")
 
-    # --- Configuração do Apêndice Fotográfico ---
     print("\n--- Configuração do Apêndice Fotográfico ---")
     while True:
         pasta_principal_input = input("➡️ Digite o nome da PASTA (ex: CTR-02-2024): ").strip()
@@ -84,13 +80,11 @@ def gerar_relatorio():
         else:
             break
 
-    # --- IDENTIFICAÇÃO DO PROCESSO ---
     match_ano = re.search(r'(\d{4})$', pasta_principal_fotos)
     if not match_ano:
         aguardar_e_encerrar(f"Não foi possível extrair o ano de: {pasta_principal_fotos}")
     ano_aba_ncs = match_ano.group(1)
 
-    # Lógica de ID de processo
     match_processo = re.match(r'(CTR)-(\d+)-(\d{4})$', pasta_principal_fotos.strip())
     if match_processo:
         id_processo_alvo = f"{match_processo.group(1)} {match_processo.group(2)}/{match_processo.group(3)}"
@@ -103,7 +97,6 @@ def gerar_relatorio():
         else:
             aguardar_e_encerrar(f"Formato de pasta inválido: {pasta_principal_fotos}")
 
-    # --- LEITURA DAS PLANILHAS ---
     try:
         fiscalizacoes_df = pd.read_excel(CAMINHO_PLANILHA, sheet_name="Fiscalizações")
         fiscalizacoes_df.columns = fiscalizacoes_df.columns.str.strip() 
@@ -118,7 +111,6 @@ def gerar_relatorio():
     except Exception as e:
         aguardar_e_encerrar(f"Erro ao ler planilha de NCs: {e}")
 
-    # Configuração de Status
     if COLUNA_STATUS not in fiscalizacoes_df.columns:
         fiscalizacoes_df[COLUNA_STATUS] = False
     fiscalizacoes_df[COLUNA_STATUS] = fiscalizacoes_df[COLUNA_STATUS].fillna(False).astype(bool)
@@ -132,24 +124,19 @@ def gerar_relatorio():
         print(f"✅ Nenhum relatório pendente para o PROCESSO: {id_processo_alvo}.")
         return
 
-    # --- GERAÇÃO DOS RELATÓRIOS ---
     for idx in tqdm(relatorios_a_gerar.index, desc="Gerando relatórios"):
         row = fiscalizacoes_df.loc[idx].copy()
         row['PROCESSO'] = id_processo_alvo 
         id_fisc_numerico = row["ID da Fiscalização"] 
  
         doc = Document()
-        
-        # 1. Configura o Word para pedir atualização de campos (Sumário) ao abrir
+    
         forcar_atualizacao_campos(doc)
-        
-        # 2. Sequência de Geração
+
         gerar_capa(doc, BASE_DIR, row)
         
-        # 3. Inserir Sumário logo após a Capa
         inserir_quebra_e_sumario(doc)
-        
-        # 4. Seções de Conteúdo
+
         gerar_secao_abreviaturas(doc, CAMINHO_PLANILHA) 
         doc.add_section(WD_SECTION.NEW_PAGE) 
         
@@ -161,15 +148,12 @@ def gerar_relatorio():
         gerar_secao_recomendacoes(doc, row)
         gerar_secao_conclusoes(doc, row, CAMINHO_PLANILHA, caminho_base_fotos)
 
-        # Salvamento
         nome_arquivo = f"relatorio_{id_fisc_numerico}" 
         caminho_docx = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.docx")
         caminho_pdf = os.path.join(RELATORIOS_DIR, f"{nome_arquivo}.pdf")
 
         doc.save(caminho_docx)
         
-        # O PDF não atualizará o sumário automaticamente (precisa do Word aberto)
-        # Recomenda-se converter para PDF após conferir o DOCX se o sumário for crítico
         try:
             convert(caminho_docx, caminho_pdf)
         except Exception as e:
@@ -177,7 +161,6 @@ def gerar_relatorio():
         
         fiscalizacoes_df.loc[idx, COLUNA_STATUS] = True
 
-    # --- CORREÇÃO DE DATAS E SALVAMENTO ---
     if "Data" in fiscalizacoes_df.columns:
         fiscalizacoes_df["Data"] = pd.to_datetime(fiscalizacoes_df["Data"], errors="coerce").dt.strftime("%d/%m/%Y")
 

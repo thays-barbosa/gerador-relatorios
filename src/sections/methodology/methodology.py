@@ -8,44 +8,29 @@ def gerar_secao_metodologia(doc: Document, row):
     Adiciona a seção "3. METODOLOGIA" ao documento, formatada conforme o modelo
     (subtítulos em negrito e lista de bullet points).
     """
-    
-    # 1. Título Principal
+  
     adicionar_titulo_secao(doc, "3. METODOLOGIA")
-    
-    # Adiciona espaço após o título
+ 
     doc.add_paragraph() 
 
-    # 2. Parágrafo Introdutório
     texto_intro = (
         "A fiscalização direta e periódica realizada pela Coordenadoria de Transportes e Rodovias da Arpe está submetida a uma "
         "metodologia organizada em três etapas: Preparação e Planejamento, Execução da Fiscalização e Monitoramento e Avaliação."
     )
-    # Usando o utilitário para parágrafo justificado (com espaçamento padrão)
+    
     adicionar_paragrafo_justificado(doc, texto_intro)
 
-    # -----------------------------------------------------------
-    # 3. Preparação e Planejamento
-    # -----------------------------------------------------------
-    
-    # 3.1. Subtítulo em Negrito
-    # Usando um parágrafo normal e adicionando um 'run' em negrito para formatar o subtítulo.
     par_prep = doc.add_paragraph()
-    # Adiciona o texto do subtítulo em negrito
+   
     par_prep.add_run("Preparação e Planejamento").bold = True
     par_prep.add_run(
         " - compreende a organização e estruturação das atividades preliminares à execução da "
         "fiscalização, destacando-se a elaboração e o envio de avisos de fiscalização à Concessionária e demais atividades de "
         "suporte à fiscalização, bem como a análise de fiscalizações anteriores com a identificação de eventuais Não Conformidades pendentes. "
     )
-    # Aparentemente, este bloco (subtítulo + descrição) deve ser justificado também:
+    
     par_prep.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
-
-    # -----------------------------------------------------------
-    # 4. Execução da Fiscalização (Com Lista)
-    # -----------------------------------------------------------
-    
-    # 4.1. Subtítulo em Negrito
     par_exec = doc.add_paragraph()
     par_exec.add_run("Execução da Fiscalização").bold = True
     par_exec.add_run(
@@ -55,9 +40,6 @@ def gerar_secao_metodologia(doc: Document, row):
     )
     par_exec.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
-    # 4.2. Lista de Bullet Points (Normas)
-    
-    # Os itens de lista são criados usando o estilo 'List Bullet'
     itens_normas = [
         "Lei nº 13.254, de 21 de junho de 2007, alterada pela Lei nº 15.200, de 17 de dezembro de 2013, e regulamentada pelo Decreto nº 40.559, de 31 de março de 2014.",
         "Resoluções Arpe nº 46, de 07 de abril de 2008 (Antiga nº 06/2008), alterada pela Resolução ARPE nº 53, de 26 de janeiro de 2009 (Antiga 003/2009); e nº 083, de 30 de julho de 2013.",
@@ -67,19 +49,9 @@ def gerar_secao_metodologia(doc: Document, row):
 
     for item in itens_normas:
         par_item = doc.add_paragraph(item, style='List Bullet')
-        # Opcional: ajustar recuos e alinhamento do item da lista.
-        # par_item.paragraph_format.left_indent = Inches(0.5)
-        # par_item.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    
-    # Adiciona um parágrafo vazio para separar visualmente a lista da próxima seção
+
     doc.add_paragraph() 
 
-
-    # -----------------------------------------------------------
-    # 5. Monitoramento e Avaliação
-    # -----------------------------------------------------------
-    
-    # 5.1. Subtítulo em Negrito
     par_monitor = doc.add_paragraph()
     par_monitor.add_run("Monitoramento e Avaliação").bold = True
     par_monitor.add_run(
